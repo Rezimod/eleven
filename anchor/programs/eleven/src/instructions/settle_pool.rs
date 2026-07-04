@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use txline_settlement::{Comparison, FixtureSummary, Predicate, ProofNode, ValidateStatArgs};
 
 use crate::{constants::*, error::ElevenError, state::Pool};
 
@@ -15,82 +16,85 @@ pub struct SettlePool<'info> {
     )]
     pub pool: Account<'info, Pool>,
 
+    /// CHECK: receives the escrow; constrained to the pool's recorded winner.
+    #[account(mut, address = pool.winner @ ElevenError::WinnerMismatch)]
+    pub winner: UncheckedAccount<'info>,
+
     /// Anyone may trigger settlement once the deadline passes — the outcome is
     /// proven cryptographically, so the caller is not trusted.
     pub settler: Signer<'info>,
 
-    /// CHECK: The TxLINE (TxOracle) program that exposes `validate_stat`.
-    /// Address-checked against the documented program id (see constants).
-    ///   devnet  6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J
-    ///   mainnet 9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA
+    /// CHECK: the TxOracle program; address-checked against the verified id.
     #[account(address = TXLINE_ORACLE_PROGRAM_ID @ ElevenError::InvalidOracleProgram)]
     pub txline_oracle: UncheckedAccount<'info>,
 
-    /// CHECK: TxLINE `dailyScoresMerkleRoots` PDA holding the on-chain Merkle
-    /// root for the fixture's epoch day. Derived on the TxOracle program:
-    ///   seeds  = [b"daily_scores_roots", (epoch_day: u16).to_le_bytes()]
-    ///   program = txline_oracle
-    /// Forwarded read-only into the `validate_stat` CPI.
+    /// CHECK: TxOracle `dailyScoresMerkleRoots` PDA, forwarded read-only into the
+    /// `validate_stat` CPI. Its derivation lives on the TxOracle program:
+    ///   seeds = [b"daily_scores_roots", (epoch_day: u16).to_le_bytes()]
     pub daily_scores_roots: UncheckedAccount<'info>,
 }
 
-pub fn handle_settle_pool(ctx: Context<SettlePool>, target_ts: i64) -> Result<()> {
+fn comparison_code(c: &Comparison) -> u8 {
+    match c {
+        Comparison::GreaterThan => 0,
+        Comparison::LessThan => 1,
+        Comparison::Equal => 2,
+    }
+}
+
+pub fn handle_settle_pool(
+    ctx: Context<SettlePool>,
+    target_ts: i64,
+    fixture_summary: FixtureSummary,
+    fixture_proof: Vec<ProofNode>,
+    main_tree_proof: Vec<ProofNode>,
+    predicate: Predicate,
+) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    {
+        let pool = &ctx.accounts.pool;
+        require!(!pool.settled, ElevenError::PoolAlreadySettled);
+        require!(now >= pool.deadline_ts, ElevenError::DeadlineNotReached);
+        // Bind the caller-supplied predicate to what the market committed to, so
+        // no one can settle against an easier claim than the pool was opened on.
+        require!(
+            predicate.threshold == pool.threshold
+                && comparison_code(&predicate.comparison) == pool.comparison,
+            ElevenError::PredicateMismatch,
+        );
+    }
+
+    // Trustless gate: CPI into TxOracle `validate_stat`. Reverts (propagated) if
+    // the Merkle proof / predicate does not hold against the on-chain root.
+    let args = ValidateStatArgs {
+        target_ts,
+        fixture_summary,
+        fixture_proof,
+        main_tree_proof,
+        predicate,
+    };
+    txline_settlement::verify_stat(
+        &ctx.accounts.txline_oracle.to_account_info(),
+        &ctx.accounts.daily_scores_roots.to_account_info(),
+        &[], // TODO(idl): extra validate_stat accounts once the public IDL lands
+        &args,
+    )?;
+
+    // Proof held → release escrow to the winner (native lamports in V1; swap for
+    // a USDC SPL transfer in production — the gating above is unchanged).
+    let amount = ctx.accounts.pool.stake_lamports;
+    **ctx.accounts.pool.to_account_info().try_borrow_mut_lamports()? -= amount;
+    **ctx.accounts.winner.to_account_info().try_borrow_mut_lamports()? += amount;
+
     let pool = &mut ctx.accounts.pool;
-
-    require!(!pool.settled, ElevenError::PoolAlreadySettled);
-    require!(
-        Clock::get()?.unix_timestamp >= pool.deadline_ts,
-        ElevenError::DeadlineNotReached,
-    );
-
-    // ── TODO: CPI into TxLINE `validate_stat` before releasing escrow ──────────
-    // Settlement must PROVE the pool's predicate against TxLINE's on-chain daily
-    // scores Merkle root rather than trusting any off-chain caller.
-    //
-    // Program id  → constants::TXLINE_ORACLE_PROGRAM_ID
-    //   devnet  6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J
-    //   mainnet 9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA
-    //
-    // Accounts (docs: examples/onchain-validation):
-    //   [0] daily_scores_roots  (PDA, read-only)  → ctx.accounts.daily_scores_roots
-    //         seeds = [b"daily_scores_roots", (epoch_day: u16).to_le_bytes()]
-    //
-    // Args, in order — fetched from GET /api/scores/stat-validation:
-    //   target_ts       : i64                 (this instruction's `target_ts`)
-    //   fixture_summary : { fixtureId, updateStats, eventStatsSubTreeRoot }
-    //   fixture_proof   : Vec<ProofNode>      // validation.subTreeProof
-    //   main_tree_proof : Vec<ProofNode>      // validation.mainTreeProof
-    //   predicate       : { threshold: pool.threshold, comparison: pool.comparison }
-    //   stat1           : { statToProve, eventStatRoot, statProof }
-    //   stat2           : Option<Stat>        // two-stat predicates (e.g. score diff)
-    //   operator        : Option<Operator>    // e.g. Subtract for goal difference
-    //
-    // Once the TxLINE IDL is vendored (declare_program!/generated cpi crate),
-    // replace the stub below with the real CPI and derive `outcome` from it:
-    //
-    //   let cpi_ctx = CpiContext::new(
-    //       ctx.accounts.txline_oracle.to_account_info(),
-    //       txline_cpi::accounts::ValidateStat {
-    //           daily_scores_merkle_roots: ctx.accounts.daily_scores_roots.to_account_info(),
-    //       },
-    //   );
-    //   // reverts if the Merkle proof / predicate does not hold:
-    //   txline_cpi::validate_stat(cpi_ctx, target_ts, fixture_summary, /* … */)?;
-    //   pool.outcome = true;
-    //
-    // Then release the USDC escrow (anchor-spl token transfer, escrow_vault → winners).
-    // ───────────────────────────────────────────────────────────────────────────
-    let _ = target_ts;
-    let _ = &ctx.accounts.txline_oracle;
-    let _ = &ctx.accounts.daily_scores_roots;
-
-    // Stub: mark settled WITHOUT releasing escrow. Real payout is gated on the
-    // `validate_stat` CPI above landing.
     pool.settled = true;
+    pool.outcome = true;
+    pool.stake_lamports = 0;
+
     msg!(
-        "settle_pool STUB: fixture {} stat {} marked settled (escrow NOT released — awaiting validate_stat CPI)",
+        "settle_pool: fixture {} settled; {} lamports released to winner",
         pool.fixture_id,
-        pool.stat_key,
+        amount,
     );
     Ok(())
 }

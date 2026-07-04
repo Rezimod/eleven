@@ -8,6 +8,7 @@ skip-lint = false
 
 [programs.localnet]
 eleven = "2DoTb77aro9SoArLPQMucnCxoTDnvZvZskYtYhSdywRm"
+mock_txoracle = "6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J"
 
 [provider]
 cluster = "localnet"

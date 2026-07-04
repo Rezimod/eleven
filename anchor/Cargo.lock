@@ -1157,10 +1157,13 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "litesvm",
+ "solana-instruction",
  "solana-keypair",
  "solana-message",
+ "solana-pubkey 3.0.0",
  "solana-signer",
  "solana-transaction",
+ "txline-settlement",
 ]
 
 [[package]]
@@ -1711,6 +1714,14 @@ dependencies = [
  "keccak",
  "rand_core 0.6.4",
  "zeroize",
+]
+
+[[package]]
+name = "mock-txoracle"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "txline-settlement",
 ]
 
 [[package]]
@@ -3876,6 +3887,13 @@ name = "toml_writer"
 version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
+
+[[package]]
+name = "txline-settlement"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+]
 
 [[package]]
 name = "typenum"

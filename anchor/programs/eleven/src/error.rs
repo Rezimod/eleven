@@ -8,6 +8,10 @@ pub enum ElevenError {
     DeadlineNotReached,
     #[msg("Provided oracle account does not match the TxLINE program id")]
     InvalidOracleProgram,
-    #[msg("TxLINE validate_stat proof did not verify the pool outcome")]
-    OutcomeNotVerified,
+    #[msg("Provided predicate does not match the pool's committed predicate")]
+    PredicateMismatch,
+    #[msg("Winner account does not match the pool's recorded winner")]
+    WinnerMismatch,
+    #[msg("Stake amount must be greater than zero")]
+    ZeroStake,
 }
