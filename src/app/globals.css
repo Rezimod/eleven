@@ -1,26 +1,129 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ── ELEVEN "stadium" brand — premium dark, high-contrast, dopamine ───────── */
+@theme {
+  --color-ink: #04060a;
+  --color-bg: #080b11;
+  --color-surface: #0f141c;
+  --color-surface2: #161d28;
+  --color-line: #232c3b;
+
+  --color-text: #eef2f8;
+  --color-muted: #8a94a7;
+  --color-faint: #5b6577;
+
+  --color-neon: #c8ff35; /* electric lime — primary action / brand */
+  --color-neon-dim: #a4d626;
+  --color-cyan: #35e2ee;
+  --color-home: #4f8dff;
+  --color-away: #ff8a3d;
+  --color-win: #33e39b;
+  --color-lose: #ff5470;
+  --color-gold: #ffcb45;
+
+  --font-display: var(--ff-display), system-ui, sans-serif;
+  --font-sans: var(--ff-sans), system-ui, sans-serif;
+  --font-mono: var(--ff-mono), ui-monospace, monospace;
+
+  --radius: 0.85rem;
+  --radius-lg: 1.15rem;
+  --radius-xl: 1.6rem;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background:
+    radial-gradient(1200px 620px at 50% -12%, #12351f2e, transparent 60%),
+    radial-gradient(900px 500px at 90% 8%, #1b2b5522, transparent 55%),
+    var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+}
+
+/* stadium "floodlight" grid texture, very subtle */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(#33405420 1px, transparent 1px),
+    linear-gradient(90deg, #33405420 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at 50% 0%, #000 0%, transparent 70%);
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@layer components {
+  .card {
+    background: color-mix(in oklab, var(--color-surface) 92%, transparent);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
+    backdrop-filter: blur(6px);
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+    border: 1px solid var(--color-line);
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full font-semibold transition;
+    min-height: 44px;
+  }
+  .btn-neon {
+    background: var(--color-neon);
+    color: #0a0f04;
+    box-shadow: 0 0 0 1px #ffffff10, 0 10px 30px -10px var(--color-neon);
+  }
+  .btn-neon:hover {
+    background: var(--color-neon-dim);
+  }
+  .btn-ghost {
+    border: 1px solid var(--color-line);
+    color: var(--color-text);
+  }
+  .btn-ghost:hover {
+    border-color: var(--color-faint);
+  }
+  .num {
+    font-family: var(--font-display);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+}
+
+/* ── motion ──────────────────────────────────────────────────────────────── */
+@keyframes goalflash {
+  0% { background-color: transparent; }
+  18% { background-color: color-mix(in oklab, var(--color-neon) 22%, transparent); }
+  100% { background-color: transparent; }
+}
+@keyframes popin {
+  0% { transform: scale(0.94); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes tickerin {
+  0% { transform: translateY(-6px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+@keyframes livepulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.animate-goalflash { animation: goalflash 1100ms ease-out; }
+.animate-popin { animation: popin 240ms cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+.animate-tickerin { animation: tickerin 200ms ease-out; }
+.livedot { animation: livepulse 1.4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
