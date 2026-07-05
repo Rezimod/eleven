@@ -53,26 +53,25 @@
 
 ---
 
-## 3. V1 scope (depth over breadth)
+## 3. V1 scope — room-based, multi-event, provably fair
 
-**Principle: nail one loop perfectly.** One event type, one real pool, real proofs, real settlement — polished end to end. We win on the settlement being genuinely trustless and genuinely verifiable, not on surface area.
+**Principle: a fair game over provable outcomes.** ELEVEN is a **room** game: players join a fixed buy-in tournament over one fixture and predict a slip of provable markets. Fairness and on-chain security are the #1 priority — this handles user funds. We win on settlement being genuinely trustless, genuinely verifiable, and genuinely fair (no pay-to-win).
 
 **IN scope for V1:**
 
-- **Exactly one event type: "next goal".** Who scores the next goal (or the next-goal window). Nothing else.
-- **Free-play hero experience.** The default, wallet-free way anyone experiences the loop.
-- **Exactly ONE real USDC pool.** A single live market with real money and real escrow.
-- **Real `validate_stat` settlement.** Actual CPI into the TxOracle program, real Merkle proof verification against the on-chain daily-scores root before escrow releases.
-- **Verifiable-receipt UI.** Anyone can re-derive the payout from the proof and confirm it independently.
+- **Room-based fixed buy-in.** A creator opens a room with a fixed buy-in tier + a capped rake; others join paying the *same* buy-in (poker-tournament fairness). Min 2 players; joins close before the first market locks. Free-play rooms = buy-in 0 (points only, no escrow) on the same scoring engine.
+- **Provable markets only.** Every market is a `validate_stat` predicate over a stat TxLINE proves — goals, corners, cards. Supported: "next goal: team", "total corners over N", "next card is red", "Team A goals > Team B" (two-stat). Non-provable stats (fouls, shots, throw-ins) are explicitly excluded.
+- **Points from skill, not stake.** Everyone starts at 0; points come *only* from correct, revealed predictions, scaled by each market's odds (longer odds → more points). Stake never buys points. Winner = most points at full time → takes the pot minus rake; ties split equally; rake → treasury.
+- **Real `validate_stat` settlement.** `resolve_market` CPIs into the TxOracle program and verifies the Merkle proof against the on-chain daily-scores root before any market resolves `yes`. `no` resolves by public timeout.
+- **Verifiable-receipt UI.** Every resolved market shows a receipt anyone can re-derive from the proof.
 
 **OUT of scope for V1 (explicitly):**
 
-- Other event types (final score, corners, cards, first scorer, over/under, etc.).
-- Multiple simultaneous pools or a market browser/list.
-- Parimutuel tuning, odds engines, order books, or AMM-style pricing beyond the single pool's mechanics.
-- Leaderboards, seasons, social graph, profiles.
-- Multi-sport or multi-league. One match at a time.
-- Mainnet at scale — V1 targets a clean, demoable single live pool.
+- Non-provable markets (fouls, shots, possession, throw-ins) — nothing TxLINE can't prove.
+- Order books / AMM pricing. Points scale off odds (TxLINE consensus where available, else a fixed table), not a live market maker.
+- Seasons, social graph, profiles, cross-room leaderboards.
+- Multi-sport or multi-league. One fixture per room.
+- Mainnet at scale — V1 targets a clean, demoable devnet loop.
 
 ---
 
@@ -143,5 +142,30 @@ How this strategy maps onto the repo:
 
 - **Reusable Anchor settlement module** — the on-chain program that escrows and releases via CPI into TxOracle's `validate_stat`. Ships with **`mock-txoracle`** for local/CI tests so we don't depend on a live match to test settlement.
 - **Thin TS settlement SDK (`lib/txline`)** — fetches Merkle proofs from `/api/scores/stat-validation` and maps them **1:1** onto the on-chain `validate_stat` args. This is the reusable piece we pitch for the Settlement track.
-- **UI-agnostic core engine (`lib/eleven`)** — the prediction/scoring loop, shared by **web-now** and **TMA-later**. No UI assumptions.
-- **On-chain program IDs are pinned to the verified TxOracle addresses:** devnet `6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J`, mainnet `9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA`. The TxOracle IDL is now **vendored** (`anchor/idl/txoracle.json`, from `txodds/tx-on-chain`): `validate_stat` takes exactly one account (`daily_scores_merkle_roots`) and eight positional args. The crate + SDK match it 1:1 and the 6 litesvm settlement tests pass — the former account-order TODO is resolved.
+- **UI-agnostic core engine (`lib/eleven`)** — pure room lifecycle + multi-event scoring (odds→points, tally, winner, tie-split, pot/rake split), shared by **web-now** and **TMA-later**. No UI assumptions; mirrors the on-chain math 1:1; 11 `node --test` unit tests.
+- **On-chain program IDs are pinned to the verified TxOracle addresses:** devnet `6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J`, mainnet `9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA`. The TxOracle IDL is **vendored** (`anchor/idl/txoracle.json`, from `txodds/tx-on-chain`): `validate_stat` takes exactly one account (`daily_scores_merkle_roots`) and eight positional args. The crate + SDK match it 1:1 — the former account-order TODO is resolved.
+
+---
+
+## 9. Room model, fairness & on-chain security
+
+The `eleven` program is the room engine. It handles user funds, so fairness + security are the #1 priority.
+
+**Accounts.**
+
+- **Room** (PDA `["room", authority, room_id]`) — fixed `buy_in`, capped `rake_bps` (≤ 10%), `max_players` (≤ 16), join/end/refund deadlines, `pot`, `treasury`, and an inline list of **Markets** (each a committed `validate_stat` predicate + timing + `yes/no` points + resolution state). Markets are inline for atomicity and a smaller attack surface.
+- **Participant** (PDA `["participant", room, owner]`) — `points` (start 0, only from correct predictions), `buy_in_paid` (for exact refunds).
+- **Prediction** (PDA `["prediction", room, market_index, owner]`) — a commit-reveal pick: `commitment = sha256(side ++ salt ++ owner ++ market_index)`, then the revealed `side`.
+
+**Instructions.** `create_room` (creator is player #1, same buy-in) · `join_room` · `commit_prediction` · `reveal_prediction` · `resolve_market` (validate_stat CPI → `yes`, or public timeout → `no`; scores every revealed prediction) · `settle_room` (pays top scorer(s) pot − rake, ties split, rake → treasury) · `refund` (timelocked, exact buy-in back).
+
+**Fairness (fixes pay-to-win).** Buy-in is uniform per room; the pot is `buy_in × players`. Stake never buys points — points come only from correct, revealed predictions, scaled by each market's odds. Winner is decided purely by points; ties split equally; the floor-division dust is handed to the first winners so the pot is conserved and the rake stays exact.
+
+**Security guarantees → the test that proves each** (`anchor/programs/eleven/tests/test_room.rs`, 14 tests + 11 core):
+
+- Escrow leaves only via `settle_room` (all markets resolved) or `refund` — no admin drain path exists → `cannot_settle_without_resolving_markets`, `refund_*`.
+- Rake capped at 10% on-chain, computed in u128 → `rake_is_capped_on_chain`, `large_pot_rake_math_is_safe`.
+- Every account is a checked PDA (seeds + bump), signer-checked, `has_one`/constraint-bound; remaining accounts are re-derived, sorted, and de-duplicated → the resolve/settle scoring paths.
+- Commit + reveal both enforced before the lock → `cannot_commit_or_reveal_after_lock`, `bad_reveal_is_rejected`.
+- Each market resolves once, each room settles once, the TxOracle program id is validated on every CPI → `market_cannot_resolve_twice`, `room_cannot_settle_twice`, `wrong_oracle_is_rejected`.
+- Winner takes pot − rake; ties split equally; bigger stake yields no extra points; checked math throughout → `winner_takes_pot_minus_rake`, `ties_split_equally`, `bigger_buy_in_yields_no_extra_points`.

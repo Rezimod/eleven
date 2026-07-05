@@ -2,45 +2,34 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useMatchRoom } from "@/lib/room/useMatchRoom";
-import { useWallet } from "@/lib/wallet/useWallet";
-import type { Side } from "@/lib/eleven";
+import { useRoom } from "@/lib/room/useRoom";
+import { TIERS } from "@/components/RoomCard";
 import { Wordmark, LivePill } from "@/components/Brand";
 import { ScoreHeader } from "@/components/room/ScoreHeader";
-import { PredictionCard } from "@/components/room/PredictionCard";
-import { EventTicker } from "@/components/room/EventTicker";
+import { PredictionSlip } from "@/components/room/PredictionSlip";
 import { Standings } from "@/components/room/PoolPanel";
-import { ReceiptCard } from "@/components/room/ReceiptCard";
+import { WinnerBanner } from "@/components/room/WinnerBanner";
+import { EventTicker } from "@/components/room/EventTicker";
 
-const mult = (p: number) => (p > 0 ? Math.max(1.05, Math.min(9, 1 / p)) : 1.9);
+const RAKE_BPS = 500; // 5%, capped at 10% on-chain
 
-export function MatchRoom({ fixtureId }: { fixtureId: number }) {
-  const room = useMatchRoom(fixtureId);
-  const wallet = useWallet();
-  const [selected, setSelected] = useState<Side | null>(null);
+export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string }) {
+  const buyIn = (TIERS.find((t) => t.key === tier) ?? TIERS[0]).buyIn;
+  const room = useRoom(fixtureId, `${fixtureId}-${tier}`, buyIn, RAKE_BPS);
 
-  // Reset the local pick whenever a fresh round opens.
-  const roundIndex = room.round?.index ?? -1;
-  useEffect(() => setSelected(null), [roundIndex]);
+  // Local tick so the commit countdown updates without feed events.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (room.phase !== "commit") return;
+    const t = setInterval(() => setTick((n) => n + 1), 500);
+    return () => clearInterval(t);
+  }, [room.phase]);
 
-  const open = room.round?.phase === "open";
-  const locked = room.round?.userSide != null;
-  const pick = room.round?.userSide ?? selected;
-
-  const homePct = Math.round(room.odds.home * 100);
-  const awayPct = 100 - homePct;
-  const { homeShort, awayShort, home, away, competition } = room.match;
-
-  const lockPrediction = () => {
-    if (open && !locked && selected) room.predict(selected);
-  };
-  const playUsdc = async () => {
-    if (!wallet.connected) await wallet.connect();
-  };
+  const { home, away, homeShort, awayShort, competition } = room.match;
+  const secsToLock = Math.max(0, Math.ceil((room.lockAt - Date.now()) / 1000));
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-4 px-4 pb-16 pt-5">
-      {/* Top bar */}
       <header className="flex items-center justify-between">
         <Link href="/">
           <Wordmark className="text-xl" />
@@ -61,48 +50,42 @@ export function MatchRoom({ fixtureId }: { fixtureId: number }) {
         clock={room.clock}
       />
 
-      <PredictionCard
-        round={room.round}
-        homeShort={homeShort}
-        awayShort={awayShort}
-        homeName={home}
-        awayName={away}
-        homePct={homePct}
-        awayPct={awayPct}
-        homeMult={mult(room.odds.home)}
-        awayMult={mult(room.odds.away)}
-        selected={pick}
-        matchOver={room.matchOver}
-        onSelect={setSelected}
-      />
-
-      {/* CTA row */}
-      <div className="flex gap-3">
-        <button
-          type="button"
-          onClick={lockPrediction}
-          disabled={!open || locked || !selected}
-          className="btn btn-lime flex-1 text-base"
-        >
-          {locked ? "Prediction locked ✓" : "Lock prediction"}
-        </button>
-        <button type="button" onClick={playUsdc} className="btn btn-ghost px-5">
-          {wallet.connected ? `● ${wallet.address}` : "Play with USDC"}
-        </button>
+      {/* Room meta */}
+      <div className="card flex items-center justify-between p-4 text-sm">
+        <div>
+          <div className="eyebrow text-muted">Buy-in</div>
+          <div className="num text-lg text-text">
+            {buyIn === 0 ? "FREE" : `${(buyIn / 1e9).toFixed(2)} ◎`}
+          </div>
+        </div>
+        <div className="text-center">
+          <div className="eyebrow text-muted">Players</div>
+          <div className="num text-lg text-text">{room.players}</div>
+        </div>
+        <div className="text-center">
+          <div className="eyebrow text-muted">Pot</div>
+          <div className="num text-lg text-lime">{buyIn === 0 ? "—" : `${(room.pot / 1e9).toFixed(2)} ◎`}</div>
+        </div>
+        <div className="text-right">
+          <div className="eyebrow text-muted">Your score</div>
+          <div className="num text-lg text-lime">{room.yourPoints}</div>
+        </div>
       </div>
 
-      {/* Free chip */}
-      <div className="pill w-full justify-center py-2 text-sm text-muted">
-        ▶ Playing free · <span className="num text-lime">{room.points.toLocaleString()}</span> pts ·
-        no wallet needed
-      </div>
-
-      {room.round?.phase === "resolved" && room.round.receipt && (
-        <ReceiptCard round={room.round} homeShort={homeShort} awayShort={awayShort} />
+      {room.phase === "commit" && (
+        <div className="pill w-full justify-center py-2 text-sm text-muted">
+          Predictions lock in <span className="num text-lime">{secsToLock}s</span> · rake {RAKE_BPS / 100}% (max 10%)
+        </div>
       )}
 
+      {room.phase === "ended" && (
+        <WinnerBanner winners={room.winners} payouts={room.payouts} buyIn={buyIn} rake={room.rake} />
+      )}
+
+      {room.ready && <PredictionSlip markets={room.markets} phase={room.phase} onPredict={room.predict} />}
+
+      <Standings standings={room.standings} pot={room.pot} />
       <EventTicker events={room.events} />
-      <Standings standings={room.standings} total={room.odds.total} />
     </main>
   );
 }

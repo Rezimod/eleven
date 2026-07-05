@@ -1,5 +1,3 @@
-import type { NextRequest } from "next/server";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -12,7 +10,7 @@ export const dynamic = "force-dynamic";
  * client `TxlineFeed` maps into `MatchSummary`s. Only active when the token is
  * set — otherwise the app runs on the simulated feed.
  */
-export async function GET(req: NextRequest) {
+export async function GET() {
   const apiToken = process.env.TXLINE_API_KEY;
   if (!apiToken) {
     return new Response("TXLINE_API_KEY not set — app is running on the simulated feed", {

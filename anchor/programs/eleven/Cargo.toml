@@ -23,6 +23,7 @@ custom-panic = []
 [dependencies]
 anchor-lang = "1.1.1"
 txline-settlement = { path = "../../crates/txline-settlement" }
+solana-sha256-hasher = "3.1.0"
 
 [dev-dependencies]
 litesvm = "0.10.0"
@@ -32,6 +33,7 @@ solana-signer = "3.0.0"
 solana-keypair = "3.0.1"
 solana-instruction = "3.0.0"
 solana-pubkey = "3.0.0"
+solana-clock = "3.0.0"
 
 
 [lints.rust]

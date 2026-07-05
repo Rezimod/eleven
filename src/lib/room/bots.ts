@@ -1,6 +1,6 @@
-import type { Market, Prediction, Side } from "@/lib/eleven";
+import type { Side } from "@/lib/eleven";
 
-/** Deterministic "crowd" so the parimutuel pool + leaderboard feel alive. */
+/** Deterministic "crowd" so rooms and standings feel alive without a backend. */
 export const BOTS = [
   "Zico_88",
   "La Pulga",
@@ -9,7 +9,6 @@ export const BOTS = [
   "TerraceTom",
   "VAR_Villain",
   "Panenka",
-  "NutmegNik",
 ];
 
 function hash(s: string): number {
@@ -21,12 +20,7 @@ function hash(s: string): number {
   return h >>> 0;
 }
 
-/** Seeded bot predictions for a market — same market id → same crowd. */
-export function botPredictions(market: Market, now: number): Prediction[] {
-  return BOTS.map((name) => {
-    const h = hash(`${market.id}:${name}`);
-    const side: Side = h % 100 < 52 ? "yes" : "no";
-    const stake = 50 + (Math.floor(h / 100) % 160);
-    return { user: name, side, stake, placedAt: now - 1 };
-  });
+/** Seeded bot pick for a market — same (room, market, bot) → same side. */
+export function botSide(roomId: string, marketId: string, bot: string): Side {
+  return hash(`${roomId}:${marketId}:${bot}`) % 100 < 52 ? "yes" : "no";
 }
