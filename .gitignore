@@ -46,3 +46,6 @@ anchor/.anchor/
 anchor/**/*.rs.bk
 test-ledger/
 .keeper-state/
+apps/keeper/.devnet/
+apps/keeper/keeper.config.devnet*.json
+apps/keeper/node_modules/
