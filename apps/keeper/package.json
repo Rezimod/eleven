@@ -1,0 +1,16 @@
+{
+  "name": "@eleven/keeper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ELEVEN autonomous settlement keeper — resolves + settles matches on-chain from TxLINE proofs, no human input.",
+  "scripts": {
+    "start": "node src/index.ts",
+    "sim": "node src/index.ts keeper.config.sim.json",
+    "test": "node --test test/*.test.ts"
+  },
+  "optionalDependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
+    "@solana/web3.js": "^1.98.0"
+  }
+}

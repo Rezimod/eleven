@@ -45,3 +45,4 @@ anchor/target/
 anchor/.anchor/
 anchor/**/*.rs.bk
 test-ledger/
+.keeper-state/

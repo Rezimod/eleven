@@ -1,0 +1,25 @@
+{
+  "feed": "live",
+  "statePath": ".keeper-state/live.json",
+  "broadcast": true,
+  "rpcUrl": "https://api.devnet.solana.com",
+  "programId": "2DoTb77aro9SoArLPQMucnCxoTDnvZvZskYtYhSdywRm",
+  "keypairPath": "/Users/you/.config/solana/eleven-devnet.json",
+  "oracleProgramId": "6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J",
+  "dailyScoresRoots": "<txoracle daily_scores_merkle_roots PDA>",
+  "txline": { "origin": "https://txline-dev.txodds.com", "apiTokenEnv": "TXLINE_API_KEY" },
+  "rooms": [
+    {
+      "roomId": "wc-r16-match1-tier-low",
+      "fixtureId": 123456,
+      "endTs": 1799999999,
+      "roomPda": "<room PDA base58>",
+      "treasury": "<treasury pubkey base58>",
+      "markets": [
+        { "index": 0, "kind": "cornersOver", "statKey": 6, "threshold": 8, "comparison": "GreaterThan", "label": "Total corners over 8" },
+        { "index": 1, "kind": "redCard", "statKey": 8, "threshold": 0, "comparison": "GreaterThan", "label": "A red card is shown" },
+        { "index": 2, "kind": "homeGoalsOver", "statKey": 1, "threshold": 1, "comparison": "GreaterThan", "label": "Home goals over 1" }
+      ]
+    }
+  ]
+}

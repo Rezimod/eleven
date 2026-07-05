@@ -1,0 +1,19 @@
+{
+  "feed": "sim",
+  "statePath": ".keeper-state/sim.json",
+  "broadcast": false,
+  "simSpeed": 6,
+  "rooms": [
+    {
+      "roomId": "sim-bra-arg-free",
+      "fixtureId": 900101,
+      "endTs": 4102444800,
+      "markets": [
+        { "index": 0, "kind": "cornersOver", "statKey": 6, "threshold": 4, "comparison": "GreaterThan", "label": "Total corners over 4" },
+        { "index": 1, "kind": "redCard", "statKey": 8, "threshold": 0, "comparison": "GreaterThan", "label": "A red card is shown" },
+        { "index": 2, "kind": "homeGoalsOver", "statKey": 1, "threshold": 2, "comparison": "GreaterThan", "label": "Brazil goals over 2" },
+        { "index": 3, "kind": "awayGoalsOver", "statKey": 1, "threshold": 5, "comparison": "GreaterThan", "label": "Argentina goals over 5" }
+      ]
+    }
+  ]
+}

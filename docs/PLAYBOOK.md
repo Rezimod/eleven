@@ -169,3 +169,31 @@ The `eleven` program is the room engine. It handles user funds, so fairness + se
 - Commit + reveal both enforced before the lock → `cannot_commit_or_reveal_after_lock`, `bad_reveal_is_rejected`.
 - Each market resolves once, each room settles once, the TxOracle program id is validated on every CPI → `market_cannot_resolve_twice`, `room_cannot_settle_twice`, `wrong_oracle_is_rejected`.
 - Winner takes pot − rake; ties split equally; bigger stake yields no extra points; checked math throughout → `winner_takes_pot_minus_rake`, `ties_split_equally`, `bigger_buy_in_yields_no_extra_points`.
+
+---
+
+## 10. Settlement keeper (Trading Tools & Agents track)
+
+`apps/keeper` is the autonomous agent that makes matches self-run — the Trading
+Tools & Agents entry. It subscribes to the TxLINE SSE stream, tracks each open
+market's predicate, and the instant a condition is decided fetches the
+`stat-validation` Merkle proof and submits `resolve_market` on-chain with **no
+human input**; at full time it submits `settle_room` (winner − rake). Reuses the
+`txline-settlement` crate shapes + the generated `eleven` IDL.
+
+**Provable-predicate model.** It watches only *monotone* provable predicates
+(team-goals-over-N, corners-over-N, red-card-shown), which map 1:1 onto the
+program's two paths: cross-true → `ProveYes` with a real `validate_stat` proof;
+never-crossed-by-deadline → `TimeoutNo` (public timeout). The predicate is derived
+on-chain from the committed market, so the keeper supplies proof material only.
+
+**Idempotent + crash-safe.** State (`resolved`/`settled` sets + `lastSeq`) is
+flushed atomically after every committed action; a market is marked resolved only
+after its tx confirms. On restart it never double-resolves or double-settles, and
+the SSE stream resumes from `Last-Event-ID` with exponential-backoff reconnect.
+Config-driven (`keeper.config.*.json`); runs on the sim feed (zero-token demo) and
+the live feed with the token.
+
+**Tests** (`node --test`, 4 passing): resolves a market once from a mock proof;
+settles a room once; ignores unprovable/edge events; recovers after a stream drop
+without double-resolving. See `apps/keeper/README.md` to run it (sim + live).

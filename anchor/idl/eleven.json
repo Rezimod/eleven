@@ -1,0 +1,1575 @@
+{
+  "address": "2DoTb77aro9SoArLPQMucnCxoTDnvZvZskYtYhSdywRm",
+  "metadata": {
+    "name": "eleven",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "ELEVEN — trustless live-football micro-prediction markets, settled by TxLINE."
+  },
+  "docs": [
+    "ELEVEN — room-based, multi-event, provable prediction game.",
+    "",
+    "Fairness: fixed buy-in per room (poker-tournament style); points come only",
+    "from correct, revealed predictions (stake never buys points); winner(s) take",
+    "the pot minus a capped rake; ties split equally. Every market outcome is",
+    "gated on a TxLINE `validate_stat` Merkle proof (or a public timeout)."
+  ],
+  "instructions": [
+    {
+      "name": "commit_prediction",
+      "docs": [
+        "Commit a hashed prediction on a market — must land before the lock."
+      ],
+      "discriminator": [
+        92,
+        250,
+        182,
+        231,
+        10,
+        22,
+        234,
+        71
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "room",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  111,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room.authority",
+                "account": "Room"
+              },
+              {
+                "kind": "account",
+                "path": "room.room_id",
+                "account": "Room"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participant",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "prediction",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  101,
+                  100,
+                  105,
+                  99,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room"
+              },
+              {
+                "kind": "arg",
+                "path": "market_index"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "market_index",
+          "type": "u16"
+        },
+        {
+          "name": "commitment",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "create_room",
+      "docs": [
+        "Create a room with a fixed buy-in + capped rake and its provable markets.",
+        "The creator is player #1 and pays the same buy-in."
+      ],
+      "discriminator": [
+        130,
+        166,
+        32,
+        2,
+        247,
+        120,
+        178,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "room",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  111,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "creator"
+              },
+              {
+                "kind": "arg",
+                "path": "args.room_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room"
+              },
+              {
+                "kind": "account",
+                "path": "creator"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "CreateRoomArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "join_room",
+      "docs": [
+        "Join an open room, paying the same fixed buy-in into escrow."
+      ],
+      "discriminator": [
+        95,
+        232,
+        188,
+        81,
+        124,
+        130,
+        78,
+        139
+      ],
+      "accounts": [
+        {
+          "name": "joiner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "room",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  111,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room.authority",
+                "account": "Room"
+              },
+              {
+                "kind": "account",
+                "path": "room.room_id",
+                "account": "Room"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room"
+              },
+              {
+                "kind": "account",
+                "path": "joiner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "refund",
+      "docs": [
+        "Refund a player's exact buy-in if the room is unfilled or voided (timelocked)."
+      ],
+      "discriminator": [
+        2,
+        96,
+        183,
+        251,
+        63,
+        208,
+        46,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "settler",
+          "docs": [
+            "Permissionless: anyone (e.g. a keeper) can trigger a player's refund —",
+            "the funds only ever go back to that player's own wallet."
+          ],
+          "signer": true
+        },
+        {
+          "name": "room",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  111,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room.authority",
+                "account": "Room"
+              },
+              {
+                "kind": "account",
+                "path": "room.room_id",
+                "account": "Room"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room"
+              },
+              {
+                "kind": "account",
+                "path": "participant.owner",
+                "account": "Participant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_wallet",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "resolve_market",
+      "docs": [
+        "Resolve a market once: prove `yes` via a `validate_stat` Merkle proof, or",
+        "resolve `no` by public timeout. Scores every revealed prediction."
+      ],
+      "discriminator": [
+        155,
+        23,
+        80,
+        173,
+        46,
+        74,
+        23,
+        239
+      ],
+      "accounts": [
+        {
+          "name": "settler",
+          "docs": [
+            "Anyone may resolve — the outcome is proven cryptographically (or by a",
+            "public timeout), so the caller is never trusted."
+          ],
+          "signer": true
+        },
+        {
+          "name": "room",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  111,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room.authority",
+                "account": "Room"
+              },
+              {
+                "kind": "account",
+                "path": "room.room_id",
+                "account": "Room"
+              }
+            ]
+          }
+        },
+        {
+          "name": "txline_oracle",
+          "address": "6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J"
+        },
+        {
+          "name": "daily_scores_roots",
+          "docs": [
+            "the `validate_stat` CPI."
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "ResolveMarketArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "reveal_prediction",
+      "docs": [
+        "Reveal a committed prediction — also before the lock, and must match the hash."
+      ],
+      "discriminator": [
+        76,
+        137,
+        127,
+        4,
+        163,
+        5,
+        110,
+        64
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "room",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  111,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room.authority",
+                "account": "Room"
+              },
+              {
+                "kind": "account",
+                "path": "room.room_id",
+                "account": "Room"
+              }
+            ]
+          }
+        },
+        {
+          "name": "prediction",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  101,
+                  100,
+                  105,
+                  99,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room"
+              },
+              {
+                "kind": "arg",
+                "path": "market_index"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "market_index",
+          "type": "u16"
+        },
+        {
+          "name": "side",
+          "type": "u8"
+        },
+        {
+          "name": "salt",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "settle_room",
+      "docs": [
+        "Settle a room once all markets are resolved: pay the top-scoring player(s)",
+        "the pot minus rake (ties split equally); rake goes to the treasury."
+      ],
+      "discriminator": [
+        179,
+        107,
+        121,
+        5,
+        100,
+        162,
+        27,
+        104
+      ],
+      "accounts": [
+        {
+          "name": "settler",
+          "docs": [
+            "Anyone may settle once the room is ready — payouts are determined purely",
+            "by proven points, so the caller is not trusted."
+          ],
+          "signer": true
+        },
+        {
+          "name": "room",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  111,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room.authority",
+                "account": "Room"
+              },
+              {
+                "kind": "account",
+                "path": "room.room_id",
+                "account": "Room"
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Participant",
+      "discriminator": [
+        32,
+        142,
+        108,
+        79,
+        247,
+        179,
+        54,
+        6
+      ]
+    },
+    {
+      "name": "Prediction",
+      "discriminator": [
+        98,
+        127,
+        141,
+        187,
+        218,
+        33,
+        8,
+        14
+      ]
+    },
+    {
+      "name": "Room",
+      "discriminator": [
+        156,
+        199,
+        67,
+        27,
+        222,
+        23,
+        185,
+        94
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "RakeTooHigh",
+      "msg": "Rake exceeds the on-chain maximum (10%)"
+    },
+    {
+      "code": 6001,
+      "name": "BadPlayerCount",
+      "msg": "Player count must be between MIN_PLAYERS and MAX_PLAYERS"
+    },
+    {
+      "code": 6002,
+      "name": "BadMarketCount",
+      "msg": "Market list is empty or exceeds MAX_MARKETS"
+    },
+    {
+      "code": 6003,
+      "name": "BadDeadlines",
+      "msg": "Deadlines are not correctly ordered"
+    },
+    {
+      "code": 6004,
+      "name": "BadPoints",
+      "msg": "Market points must be positive"
+    },
+    {
+      "code": 6005,
+      "name": "BadRoomState",
+      "msg": "Room is not in the expected state"
+    },
+    {
+      "code": 6006,
+      "name": "RoomAlreadySettled",
+      "msg": "Room is already settled"
+    },
+    {
+      "code": 6007,
+      "name": "JoinClosed",
+      "msg": "Join window has closed"
+    },
+    {
+      "code": 6008,
+      "name": "RoomFull",
+      "msg": "Room is full"
+    },
+    {
+      "code": 6009,
+      "name": "BadMarketIndex",
+      "msg": "Market index out of range"
+    },
+    {
+      "code": 6010,
+      "name": "MarketLocked",
+      "msg": "Prediction window is locked"
+    },
+    {
+      "code": 6011,
+      "name": "MarketAlreadyResolved",
+      "msg": "Market has already been resolved"
+    },
+    {
+      "code": 6012,
+      "name": "MarketsUnresolved",
+      "msg": "Not all markets have been resolved yet"
+    },
+    {
+      "code": 6013,
+      "name": "AlreadyRevealed",
+      "msg": "Prediction already revealed"
+    },
+    {
+      "code": 6014,
+      "name": "BadReveal",
+      "msg": "Reveal does not match the committed hash"
+    },
+    {
+      "code": 6015,
+      "name": "BadSide",
+      "msg": "Invalid prediction side (must be 0 or 1)"
+    },
+    {
+      "code": 6016,
+      "name": "InvalidOracleProgram",
+      "msg": "Provided oracle account does not match the TxLINE program id"
+    },
+    {
+      "code": 6017,
+      "name": "PredicateMismatch",
+      "msg": "Provided predicate does not match the market's committed predicate"
+    },
+    {
+      "code": 6018,
+      "name": "TimeoutNotReached",
+      "msg": "Timeout resolution requires the resolve deadline to have passed"
+    },
+    {
+      "code": 6019,
+      "name": "EndNotReached",
+      "msg": "Full time has not been reached yet"
+    },
+    {
+      "code": 6020,
+      "name": "AccountCountMismatch",
+      "msg": "Wrong number of scoring/settlement accounts supplied"
+    },
+    {
+      "code": 6021,
+      "name": "BadAccountOwner",
+      "msg": "A supplied account is not owned by this program"
+    },
+    {
+      "code": 6022,
+      "name": "UnsortedOrDuplicate",
+      "msg": "Accounts must be sorted by owner and unique"
+    },
+    {
+      "code": 6023,
+      "name": "AccountMismatch",
+      "msg": "A supplied account does not belong to this room/market"
+    },
+    {
+      "code": 6024,
+      "name": "WalletMismatch",
+      "msg": "Wallet does not match the participant owner"
+    },
+    {
+      "code": 6025,
+      "name": "TreasuryMismatch",
+      "msg": "Treasury account does not match the room treasury"
+    },
+    {
+      "code": 6026,
+      "name": "RefundNotAvailable",
+      "msg": "Refund is not available yet"
+    },
+    {
+      "code": 6027,
+      "name": "AlreadyRefunded",
+      "msg": "Participant already refunded"
+    },
+    {
+      "code": 6028,
+      "name": "MathOverflow",
+      "msg": "Arithmetic overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "BinaryExpression",
+      "docs": [
+        "IDL `BinaryExpression` — combinator for two-stat predicates (e.g. score diff)."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Add"
+          },
+          {
+            "name": "Subtract"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CreateRoomArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "room_id",
+            "type": "u64"
+          },
+          {
+            "name": "fixture_id",
+            "type": "u32"
+          },
+          {
+            "name": "buy_in_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "rake_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_players",
+            "type": "u16"
+          },
+          {
+            "name": "join_deadline_ts",
+            "type": "i64"
+          },
+          {
+            "name": "end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "refund_deadline_ts",
+            "type": "i64"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "markets",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "MarketInit"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "FixtureSummary",
+      "docs": [
+        "IDL `ScoresBatchSummary` — the per-fixture summary that roots the event sub-tree."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "fixture_id",
+            "type": "i64"
+          },
+          {
+            "name": "update_stats",
+            "type": {
+              "defined": {
+                "name": "ScoresUpdateStats"
+              }
+            }
+          },
+          {
+            "name": "events_sub_tree_root",
+            "docs": [
+              "IDL `events_sub_tree_root`."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Market",
+      "docs": [
+        "One provable market inside a room — a `validate_stat` predicate over a stat",
+        "TxLINE proves (goals / corners / cards). Stored inline in the Room so a room",
+        "is one atomic unit (smaller attack surface than N market accounts).",
+        "",
+        "A market is `yes` iff the committed predicate holds:",
+        "`has_second == false` → `stat(key,period) <cmp> threshold`",
+        "`has_second == true`  → `(stat_a <op> stat_b) <cmp> threshold`   (e.g. A goals − B goals > 0)"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "stat_key",
+            "type": "u16"
+          },
+          {
+            "name": "period",
+            "type": "u16"
+          },
+          {
+            "name": "threshold",
+            "docs": [
+              "Predicate threshold (compared as i32 on-chain, per the TxOracle IDL)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "comparison",
+            "docs": [
+              "0 = GreaterThan, 1 = LessThan, 2 = EqualTo."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "has_second",
+            "docs": [
+              "Two-stat predicate (e.g. \"Team A goals > Team B goals\")."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "stat_key2",
+            "type": "u16"
+          },
+          {
+            "name": "period2",
+            "type": "u16"
+          },
+          {
+            "name": "op",
+            "docs": [
+              "0 = Add, 1 = Subtract (only when `has_second`)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "lock_ts",
+            "docs": [
+              "Commit + reveal must both land before this — the on-chain lock."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "resolve_deadline_ts",
+            "docs": [
+              "A `no` (timeout) resolution is only allowed once this has passed."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "yes_points",
+            "docs": [
+              "Points a correct `yes`/`no` predictor earns — scaled by odds off-chain,",
+              "applied verbatim on-chain (longer odds → more points). Stake never adds."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "no_points",
+            "type": "u32"
+          },
+          {
+            "name": "reveal_count",
+            "docs": [
+              "Number of revealed predictions — `resolve_market` must score exactly this many."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "resolved",
+            "type": "bool"
+          },
+          {
+            "name": "outcome",
+            "docs": [
+              "The proven outcome: true = predicate held (`yes`), false = did not (`no`)."
+            ],
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketInit",
+      "docs": [
+        "One market's fixed config, supplied at room creation."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "stat_key",
+            "type": "u16"
+          },
+          {
+            "name": "period",
+            "type": "u16"
+          },
+          {
+            "name": "threshold",
+            "type": "i64"
+          },
+          {
+            "name": "comparison",
+            "type": "u8"
+          },
+          {
+            "name": "has_second",
+            "type": "bool"
+          },
+          {
+            "name": "stat_key2",
+            "type": "u16"
+          },
+          {
+            "name": "period2",
+            "type": "u16"
+          },
+          {
+            "name": "op",
+            "type": "u8"
+          },
+          {
+            "name": "lock_ts",
+            "type": "i64"
+          },
+          {
+            "name": "resolve_deadline_ts",
+            "type": "i64"
+          },
+          {
+            "name": "yes_points",
+            "type": "u32"
+          },
+          {
+            "name": "no_points",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Participant",
+      "docs": [
+        "A player in a room. Points start at 0 and only rise from correct predictions."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "room",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "points",
+            "docs": [
+              "Earned strictly from correct, revealed predictions — never from stake."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "buy_in_paid",
+            "docs": [
+              "Exact buy-in escrowed (for a precise refund)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "refunded",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Prediction",
+      "docs": [
+        "A single player's commit-reveal prediction on one market."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "room",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "market_index",
+            "type": "u16"
+          },
+          {
+            "name": "commitment",
+            "docs": [
+              "sha256(side_byte ++ salt) — fixed before the lock; hides the pick."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "revealed",
+            "type": "bool"
+          },
+          {
+            "name": "side",
+            "docs": [
+              "0 = no (predicate won't hold), 1 = yes (predicate will hold)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "scored",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProofNode",
+      "docs": [
+        "One Merkle authentication node. `is_right_sibling` says which side to fold on."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "is_right_sibling",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ResolveKind",
+      "docs": [
+        "How a market is resolved."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "ProveYes"
+          },
+          {
+            "name": "TimeoutNo"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ResolveMarketArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_index",
+            "type": "u16"
+          },
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "ResolveKind"
+              }
+            }
+          },
+          {
+            "name": "target_ts",
+            "type": "i64"
+          },
+          {
+            "name": "fixture_summary",
+            "type": {
+              "defined": {
+                "name": "FixtureSummary"
+              }
+            }
+          },
+          {
+            "name": "fixture_proof",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "ProofNode"
+                }
+              }
+            }
+          },
+          {
+            "name": "main_tree_proof",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "ProofNode"
+                }
+              }
+            }
+          },
+          {
+            "name": "stat_a",
+            "type": {
+              "defined": {
+                "name": "StatTerm"
+              }
+            }
+          },
+          {
+            "name": "stat_b",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "StatTerm"
+                }
+              }
+            }
+          },
+          {
+            "name": "op",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "BinaryExpression"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Room",
+      "docs": [
+        "A prediction room: a fixed buy-in tournament over one fixture's markets."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "docs": [
+              "Where rake is sent at settlement (set at creation; capped by MAX_RAKE_BPS)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "room_id",
+            "type": "u64"
+          },
+          {
+            "name": "fixture_id",
+            "type": "u32"
+          },
+          {
+            "name": "buy_in_lamports",
+            "docs": [
+              "Fixed buy-in every player pays (0 = free-play, points only, no escrow)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "rake_bps",
+            "type": "u16"
+          },
+          {
+            "name": "max_players",
+            "type": "u16"
+          },
+          {
+            "name": "player_count",
+            "type": "u16"
+          },
+          {
+            "name": "join_deadline_ts",
+            "docs": [
+              "Joins close here; must be before the first market lock."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "end_ts",
+            "docs": [
+              "Full time — `settle_room` is only allowed after this."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "refund_deadline_ts",
+            "docs": [
+              "Timelock: after this an unsettled room can be refunded."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "pot_lamports",
+            "docs": [
+              "Total escrow held in this account (on top of rent) = buy_in × players."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "resolved_market_count",
+            "type": "u16"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "RoomState"
+              }
+            }
+          },
+          {
+            "name": "settled",
+            "type": "bool"
+          },
+          {
+            "name": "markets",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Market"
+                }
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoomState",
+      "docs": [
+        "Room lifecycle state."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Settled"
+          },
+          {
+            "name": "Refunding"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ScoreStat",
+      "docs": [
+        "IDL `ScoreStat` — the stat leaf being proven (`key` = stat kind, e.g. goals)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "key",
+            "type": "u32"
+          },
+          {
+            "name": "value",
+            "type": "i32"
+          },
+          {
+            "name": "period",
+            "type": "i32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ScoresUpdateStats",
+      "docs": [
+        "IDL `ScoresUpdateStats` — bounds of the fixture's update window."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "update_count",
+            "type": "i32"
+          },
+          {
+            "name": "min_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "max_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StatTerm",
+      "docs": [
+        "IDL `StatTerm` — one stat + its authentication path to the event sub-tree root."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "stat_to_prove",
+            "type": {
+              "defined": {
+                "name": "ScoreStat"
+              }
+            }
+          },
+          {
+            "name": "event_stat_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "stat_proof",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "ProofNode"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "constants": [
+    {
+      "name": "PARTICIPANT_SEED",
+      "docs": [
+        "Participant PDA seed: `[PARTICIPANT_SEED, room, owner]`."
+      ],
+      "type": "bytes",
+      "value": "[112, 97, 114, 116, 105, 99, 105, 112, 97, 110, 116]"
+    },
+    {
+      "name": "PREDICTION_SEED",
+      "docs": [
+        "Prediction PDA seed: `[PREDICTION_SEED, room, market_index.le(2), owner]`."
+      ],
+      "type": "bytes",
+      "value": "[112, 114, 101, 100, 105, 99, 116, 105, 111, 110]"
+    },
+    {
+      "name": "ROOM_SEED",
+      "docs": [
+        "Room PDA seed: `[ROOM_SEED, authority, room_id.le(8)]`."
+      ],
+      "type": "bytes",
+      "value": "[114, 111, 111, 109]"
+    }
+  ]
+}
