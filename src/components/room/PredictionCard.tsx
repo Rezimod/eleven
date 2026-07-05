@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Side } from "@/lib/eleven";
 import type { Round } from "@/lib/room/useMatchRoom";
+import { TeamFlag } from "@/components/Brand";
 
 function useCountdown(lockAt: number | undefined, active: boolean) {
   const [remaining, setRemaining] = useState(0);
@@ -16,44 +17,45 @@ function useCountdown(lockAt: number | undefined, active: boolean) {
   return remaining;
 }
 
-function SideButton({
-  label,
-  sub,
-  tone,
-  picked,
+function PickButton({
+  short,
+  name,
+  mult,
+  selected,
   dimmed,
   win,
   disabled,
   onClick,
 }: {
-  label: string;
-  sub: string;
-  tone: "home" | "away";
-  picked: boolean;
+  short: string;
+  name: string;
+  mult: number;
+  selected: boolean;
   dimmed: boolean;
   win: boolean;
   disabled: boolean;
   onClick: () => void;
 }) {
-  const color = tone === "home" ? "var(--color-home)" : "var(--color-away)";
+  const lit = selected || win;
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="btn relative flex-1 flex-col rounded-xl px-3 py-3 transition disabled:cursor-default"
+      className="relative flex flex-1 flex-col items-center gap-2 rounded-[16px] px-3 py-4 transition"
       style={{
-        background: picked || win ? `color-mix(in oklab, ${color} 22%, transparent)` : "var(--color-surface2)",
-        border: `1px solid ${picked || win ? color : "var(--color-line)"}`,
-        opacity: dimmed ? 0.45 : 1,
-        boxShadow: win ? `0 0 0 1px ${color}, 0 10px 30px -12px ${color}` : "none",
+        background: lit ? "rgba(198,255,58,0.1)" : "var(--color-panel2)",
+        border: `1px solid ${lit ? "var(--color-lime)" : "var(--color-line)"}`,
+        opacity: dimmed ? 0.4 : 1,
+        boxShadow: lit ? "0 0 0 1px rgba(198,255,58,0.35), 0 10px 30px -12px rgba(198,255,58,0.6)" : "none",
       }}
     >
-      <span className="font-display text-base font-bold" style={{ color }}>
-        {label}
-      </span>
-      <span className="num mt-0.5 text-xs text-muted">{sub}</span>
-      {picked && <span className="mt-1 text-[11px] text-neon">✓ your pick</span>}
+      <TeamFlag short={short} size={30} />
+      <span className="text-[13px] font-semibold text-text">{name || short}</span>
+      <span className="num text-lg text-lime">×{mult.toFixed(1)} pts</span>
+      {selected && !win && (
+        <span className="eyebrow absolute right-2 top-2 text-lime">picked</span>
+      )}
     </button>
   );
 }
@@ -62,92 +64,112 @@ export function PredictionCard({
   round,
   homeShort,
   awayShort,
+  homeName,
+  awayName,
   homePct,
   awayPct,
+  homeMult,
+  awayMult,
+  selected,
   matchOver,
-  predict,
+  onSelect,
 }: {
   round: Round | null;
   homeShort: string;
   awayShort: string;
+  homeName: string;
+  awayName: string;
   homePct: number;
   awayPct: number;
+  homeMult: number;
+  awayMult: number;
+  selected: Side | null;
   matchOver: boolean;
-  predict: (side: Side) => void;
+  onSelect: (side: Side) => void;
 }) {
   const open = round?.phase === "open";
   const remaining = useCountdown(round?.lockAt, open);
   const secs = Math.ceil(remaining / 1000);
-  const pct = Math.max(0, Math.min(100, (remaining / 10000) * 100));
 
   if (matchOver && (!round || round.phase === "resolved")) {
     return (
-      <div className="card p-5 text-center">
-        <div className="font-display text-lg font-bold">Full time 🏁</div>
-        <p className="mt-1 text-sm text-muted">Thanks for playing. Check your standings below.</p>
+      <div className="card-accent p-6 text-center">
+        <div className="display text-2xl">FULL TIME</div>
+        <p className="mt-2 text-sm text-muted">Thanks for playing. Check your standings below.</p>
       </div>
     );
   }
 
   if (!round) {
     return (
-      <div className="card p-5 text-center text-sm text-muted">Get ready — kick-off imminent…</div>
+      <div className="card-accent p-6 text-center text-sm text-muted">
+        Get ready — kick-off imminent…
+      </div>
     );
   }
 
   const resolved = round.phase === "resolved";
+  const locked = round.userSide !== null;
   const homeWon = round.outcome === true;
   const awayWon = round.outcome === false;
 
   return (
-    <div className={`card p-4 ${resolved ? "animate-goalflash" : ""}`}>
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="font-display text-base font-bold">Who scores the NEXT goal?</h3>
-        {open ? (
-          <span className="num chip border-neon/40 text-neon">{secs}s</span>
-        ) : round.phase === "locked" ? (
-          <span className="chip text-cyan border-cyan/40">LOCKED</span>
-        ) : (
-          <span className={`chip ${round.won ? "text-win border-win/40" : "text-muted"}`}>
-            {round.userSide ? (round.won ? "WON" : "MISSED") : "RESOLVED"}
-          </span>
-        )}
+    <div className={`card-accent p-5 ${resolved ? "animate-goalflash" : ""}`}>
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="eyebrow text-lime">Next goal</div>
+          <h3 className="display mt-1 text-[26px]">Who scores next?</h3>
+        </div>
+        <div className="text-right">
+          {open ? (
+            <>
+              <div className="num text-[20px] text-text">{secs}s</div>
+              <div className="eyebrow text-faint">Locks in</div>
+            </>
+          ) : round.phase === "locked" ? (
+            <span className="pill text-muted">LOCKED</span>
+          ) : (
+            <span className={`pill ${round.won ? "pill-lime" : "text-muted"}`}>
+              {round.userSide ? (round.won ? "WON" : "MISSED") : "RESOLVED"}
+            </span>
+          )}
+        </div>
       </div>
 
-      <div className="flex gap-3">
-        <SideButton
-          label={homeShort}
-          sub={`${homePct}% · Home`}
-          tone="home"
-          picked={round.userSide === "yes"}
+      <div className="mt-4 flex gap-3">
+        <PickButton
+          short={homeShort}
+          name={homeName}
+          mult={homeMult}
+          selected={selected === "yes"}
           dimmed={resolved && !homeWon}
           win={resolved && homeWon}
-          disabled={!open || round.userSide !== null}
-          onClick={() => predict("yes")}
+          disabled={!open || locked}
+          onClick={() => onSelect("yes")}
         />
-        <SideButton
-          label={awayShort}
-          sub={`${awayPct}% · Away`}
-          tone="away"
-          picked={round.userSide === "no"}
+        <PickButton
+          short={awayShort}
+          name={awayName}
+          mult={awayMult}
+          selected={selected === "no"}
           dimmed={resolved && !awayWon}
           win={resolved && awayWon}
-          disabled={!open || round.userSide !== null}
-          onClick={() => predict("no")}
+          disabled={!open || locked}
+          onClick={() => onSelect("no")}
         />
       </div>
 
-      {/* lock countdown */}
-      {open && (
-        <div className="mt-3">
-          <div className="h-1 overflow-hidden rounded-full bg-surface2">
-            <div className="h-full bg-neon transition-[width] duration-100" style={{ width: `${pct}%` }} />
-          </div>
-          <p className="mt-1.5 text-center text-xs text-faint">
-            {round.userSide ? "Locked in — waiting for the whistle" : "Tap a side before the window closes"}
-          </p>
+      {/* pool split bar */}
+      <div className="mt-4">
+        <div className="flex h-2.5 overflow-hidden rounded-full" style={{ background: "rgba(255,255,255,0.28)" }}>
+          <div className="h-full bg-lime" style={{ width: `${homePct}%` }} />
         </div>
-      )}
+        <div className="mt-1.5 flex justify-between text-[11px] text-muted">
+          <span className="text-lime">{homePct}%</span>
+          <span>{homePct}% / {awayPct}%</span>
+          <span>{awayPct}%</span>
+        </div>
+      </div>
 
       {round.phase === "locked" && (
         <p className="mt-3 text-center text-sm text-muted">
@@ -156,14 +178,12 @@ export function PredictionCard({
       )}
 
       {resolved && (
-        <div className="mt-3 text-center">
+        <div className="mt-4 text-center">
           {round.userSide ? (
             round.won ? (
-              <p className="font-display text-lg font-bold text-win">
-                +{round.payout?.toLocaleString()} pts 🎉
-              </p>
+              <p className="display text-xl text-lime">+{round.payout?.toLocaleString()} PTS</p>
             ) : (
-              <p className="text-sm text-lose">
+              <p className="text-sm text-red">
                 {round.outcome ? homeShort : awayShort} scored — not your pick.
               </p>
             )

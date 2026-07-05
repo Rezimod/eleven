@@ -1,20 +1,28 @@
-import Link from "next/link";
 import type { MatchClock, Score } from "@/lib/feed";
+import { TeamFlag } from "@/components/Brand";
 
 const PERIOD_LABEL: Record<MatchClock["period"], string> = {
-  PRE: "Pre-match",
-  "1H": "1st half",
-  HT: "Half time",
-  "2H": "2nd half",
-  FT: "Full time",
+  PRE: "PRE-MATCH",
+  "1H": "1ST HALF",
+  HT: "HALF TIME",
+  "2H": "2ND HALF",
+  FT: "FULL TIME",
 };
+
+function TeamCol({ short, name, align }: { short: string; name: string; align: "left" | "right" }) {
+  return (
+    <div className={`flex flex-col items-center gap-2 ${align === "left" ? "sm:items-start" : "sm:items-end"}`}>
+      <TeamFlag short={short} size={34} />
+      <span className="text-center text-[13px] font-medium text-muted">{name || short}</span>
+    </div>
+  );
+}
 
 export function ScoreHeader({
   home,
   away,
   homeShort,
   awayShort,
-  competition,
   score,
   clock,
 }: {
@@ -26,45 +34,24 @@ export function ScoreHeader({
   score: Score;
   clock: MatchClock;
 }) {
-  const live = clock.running;
+  const label = PERIOD_LABEL[clock.period];
+  const meta = clock.running ? `${label} · ${clock.minute}'` : label;
+
   return (
-    <div className="card p-4">
-      <div className="mb-3 flex items-center justify-between text-xs text-muted">
-        <Link href="/" className="hover:text-text">
-          ← Lobby
-        </Link>
-        <span>{competition}</span>
-        <span className={live ? "text-lose" : "text-faint"}>
-          {live ? (
-            <span className="inline-flex items-center gap-1.5">
-              <span className="livedot inline-block h-1.5 w-1.5 rounded-full bg-lose" />
-              {clock.minute}&apos;
-            </span>
-          ) : (
-            PERIOD_LABEL[clock.period]
-          )}
-        </span>
+    <div className="card grid grid-cols-3 items-center gap-2 p-5">
+      <TeamCol short={homeShort} name={home} align="right" />
+
+      <div className="flex flex-col items-center">
+        <div
+          key={`${score.home}-${score.away}`}
+          className="display animate-scorebump text-[46px]"
+        >
+          {score.home}<span className="mx-1.5 text-faint">–</span>{score.away}
+        </div>
+        <div className="num mt-1 text-center text-[12px] tracking-wide text-lime">{meta}</div>
       </div>
 
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-        <div className="text-right">
-          <div className="font-semibold leading-tight">{home || "Home"}</div>
-          <div className="text-xs" style={{ color: "var(--color-home)" }}>
-            {homeShort}
-          </div>
-        </div>
-        <div className="num rounded-xl bg-surface2 px-4 py-1.5 text-3xl font-bold">
-          {score.home}
-          <span className="mx-1.5 text-muted">:</span>
-          {score.away}
-        </div>
-        <div className="text-left">
-          <div className="font-semibold leading-tight">{away || "Away"}</div>
-          <div className="text-xs" style={{ color: "var(--color-away)" }}>
-            {awayShort}
-          </div>
-        </div>
-      </div>
+      <TeamCol short={awayShort} name={away} align="left" />
     </div>
   );
 }

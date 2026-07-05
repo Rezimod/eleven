@@ -1,50 +1,47 @@
 import Link from "next/link";
 import type { MatchSummary } from "@/lib/feed";
-
-function Crest({ short, tone }: { short: string; tone: "home" | "away" }) {
-  return (
-    <span
-      className="num flex h-11 w-11 items-center justify-center rounded-xl text-sm font-bold"
-      style={{
-        background: tone === "home" ? "color-mix(in oklab, var(--color-home) 20%, transparent)" : "color-mix(in oklab, var(--color-away) 20%, transparent)",
-        color: tone === "home" ? "var(--color-home)" : "var(--color-away)",
-        border: `1px solid ${tone === "home" ? "var(--color-home)" : "var(--color-away)"}30`,
-      }}
-    >
-      {short}
-    </span>
-  );
-}
+import { LivePill, TeamFlag } from "@/components/Brand";
 
 export function MatchCard({ m }: { m: MatchSummary }) {
   const live = m.status === "live";
   return (
     <Link
       href={`/match/${m.fixtureId}`}
-      className="card group block p-4 transition hover:border-neon/50"
+      className="card group block p-4 transition hover:border-[rgba(198,255,58,0.4)]"
     >
-      <div className="mb-3 flex items-center justify-between text-xs text-muted">
-        <span>{m.competition}</span>
-        <span className={live ? "text-lose" : "text-faint"}>
-          {live ? "● LIVE" : m.kickoffLabel}
-        </span>
+      <div className="mb-3 flex items-center justify-between text-xs">
+        <span className="text-muted">{m.competition}</span>
+        {live ? (
+          <LivePill minute={m.minute} />
+        ) : (
+          <span className="pill text-faint">{m.kickoffLabel}</span>
+        )}
       </div>
 
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Crest short={m.homeShort} tone="home" />
-          <div className="leading-tight">
-            <div className="font-semibold">{m.home}</div>
-            <div className="text-xs text-muted">vs {m.away}</div>
-          </div>
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <TeamFlag short={m.homeShort} size={30} />
+          <span className="truncate font-semibold">{m.home}</span>
         </div>
-        <Crest short={m.awayShort} tone="away" />
+
+        {live ? (
+          <span className="num shrink-0 px-2 text-2xl">
+            {m.score.home}<span className="mx-1 text-faint">–</span>{m.score.away}
+          </span>
+        ) : (
+          <span className="shrink-0 text-xs font-semibold text-muted">vs</span>
+        )}
+
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
+          <span className="truncate text-right font-semibold">{m.away}</span>
+          <TeamFlag short={m.awayShort} size={30} />
+        </div>
       </div>
 
       <div className="mt-4 flex items-center justify-between">
         <span className="text-xs text-muted">Predict the next goal</span>
-        <span className="btn btn-neon px-4 py-1.5 text-sm group-hover:brightness-105">
-          {live ? "Play now" : "Enter"} →
+        <span className="pill pill-lime group-hover:brightness-110">
+          ▶ Play free
         </span>
       </div>
     </Link>

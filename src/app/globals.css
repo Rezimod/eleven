@@ -1,33 +1,26 @@
 @import "tailwindcss";
 
-/* ── ELEVEN "stadium" brand — premium dark, high-contrast, dopamine ───────── */
+/* ── ELEVEN — approved design system ──────────────────────────────────────── */
 @theme {
-  --color-ink: #04060a;
-  --color-bg: #080b11;
-  --color-surface: #0f141c;
-  --color-surface2: #161d28;
-  --color-line: #232c3b;
+  --color-bg: #0a0d12;
+  --color-panel: rgba(255, 255, 255, 0.045);
+  --color-panel2: rgba(255, 255, 255, 0.07);
+  --color-line: rgba(255, 255, 255, 0.1);
 
-  --color-text: #eef2f8;
-  --color-muted: #8a94a7;
-  --color-faint: #5b6577;
+  --color-lime: #c6ff3a; /* primary accent */
+  --color-red: #ff4d4d; /* live */
 
-  --color-neon: #c8ff35; /* electric lime — primary action / brand */
-  --color-neon-dim: #a4d626;
-  --color-cyan: #35e2ee;
-  --color-home: #4f8dff;
-  --color-away: #ff8a3d;
-  --color-win: #33e39b;
-  --color-lose: #ff5470;
-  --color-gold: #ffcb45;
+  --color-text: #f4f7ff;
+  --color-muted: rgba(255, 255, 255, 0.55);
+  --color-faint: rgba(255, 255, 255, 0.35);
 
-  --font-display: var(--ff-display), system-ui, sans-serif;
-  --font-sans: var(--ff-sans), system-ui, sans-serif;
-  --font-mono: var(--ff-mono), ui-monospace, monospace;
+  --font-display: var(--ff-display), system-ui, sans-serif; /* Anton */
+  --font-sans: var(--ff-sans), system-ui, sans-serif; /* Inter */
+  --font-mono: ui-monospace, "SFMono-Regular", "Menlo", monospace;
 
-  --radius: 0.85rem;
-  --radius-lg: 1.15rem;
-  --radius-xl: 1.6rem;
+  --radius-card: 22px;
+  --radius-card-inner: 16px;
+  --radius-btn: 14px;
 }
 
 html {
@@ -35,76 +28,110 @@ html {
 }
 
 body {
+  min-height: 100dvh;
   background:
-    radial-gradient(1200px 620px at 50% -12%, #12351f2e, transparent 60%),
-    radial-gradient(900px 500px at 90% 8%, #1b2b5522, transparent 55%),
-    var(--color-bg);
+    radial-gradient(120% 55% at 50% 0%, #12341f 0%, #0a0d12 46%, #06080c 100%),
+    #06080c;
+  background-attachment: fixed;
   color: var(--color-text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  min-height: 100dvh;
+  text-rendering: optimizeLegibility;
 }
 
-/* stadium "floodlight" grid texture, very subtle */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background-image:
-    linear-gradient(#33405420 1px, transparent 1px),
-    linear-gradient(90deg, #33405420 1px, transparent 1px);
-  background-size: 44px 44px;
-  mask-image: radial-gradient(circle at 50% 0%, #000 0%, transparent 70%);
-  opacity: 0.5;
-  pointer-events: none;
-  z-index: 0;
-}
-
+/* ── components ───────────────────────────────────────────────────────────── */
 @layer components {
   .card {
-    background: color-mix(in oklab, var(--color-surface) 92%, transparent);
+    background: var(--color-panel);
     border: 1px solid var(--color-line);
-    border-radius: var(--radius-lg);
-    backdrop-filter: blur(6px);
+    border-radius: var(--radius-card);
+    backdrop-filter: blur(8px);
   }
-  .chip {
-    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
-    border: 1px solid var(--color-line);
+  .card-accent {
+    background: linear-gradient(180deg, rgba(198, 255, 58, 0.06), rgba(198, 255, 58, 0));
+    border: 1px solid rgba(198, 255, 58, 0.28);
+    border-radius: var(--radius-card);
+    box-shadow: 0 0 0 1px rgba(198, 255, 58, 0.04) inset, 0 12px 40px -24px rgba(198, 255, 58, 0.5);
   }
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-full font-semibold transition;
-    min-height: 44px;
+
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
   }
-  .btn-neon {
-    background: var(--color-neon);
-    color: #0a0f04;
-    box-shadow: 0 0 0 1px #ffffff10, 0 10px 30px -10px var(--color-neon);
-  }
-  .btn-neon:hover {
-    background: var(--color-neon-dim);
-  }
-  .btn-ghost {
-    border: 1px solid var(--color-line);
-    color: var(--color-text);
-  }
-  .btn-ghost:hover {
-    border-color: var(--color-faint);
+
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+    line-height: 0.95;
   }
   .num {
     font-family: var(--font-display);
+    font-weight: 400;
     font-variant-numeric: tabular-nums;
-    letter-spacing: 0.01em;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 font-semibold transition;
+    min-height: 50px;
+    border-radius: var(--radius-btn);
+  }
+  .btn:disabled {
+    cursor: default;
+  }
+  .btn-lime {
+    background: var(--color-lime);
+    color: #0a0d12;
+    box-shadow: 0 10px 30px rgba(198, 255, 58, 0.28);
+  }
+  .btn-lime:not(:disabled):hover {
+    filter: brightness(1.06);
+  }
+  .btn-lime:disabled {
+    opacity: 0.5;
+    box-shadow: none;
+  }
+  .btn-ghost {
+    background: var(--color-panel2);
+    border: 1px solid var(--color-line);
+    color: var(--color-text);
+  }
+  .btn-ghost:not(:disabled):hover {
+    border-color: var(--color-faint);
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold;
+    border: 1px solid var(--color-line);
+  }
+  .pill-live {
+    border-color: rgba(255, 77, 77, 0.4);
+    background: rgba(255, 77, 77, 0.1);
+    color: var(--color-red);
+  }
+  .pill-lime {
+    border-color: rgba(198, 255, 58, 0.4);
+    background: rgba(198, 255, 58, 0.1);
+    color: var(--color-lime);
   }
 }
 
-/* ── motion ──────────────────────────────────────────────────────────────── */
+/* ── motion ───────────────────────────────────────────────────────────────── */
 @keyframes goalflash {
   0% { background-color: transparent; }
-  18% { background-color: color-mix(in oklab, var(--color-neon) 22%, transparent); }
+  16% { background-color: rgba(198, 255, 58, 0.16); }
   100% { background-color: transparent; }
 }
+@keyframes scorebump {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
 @keyframes popin {
-  0% { transform: scale(0.94); opacity: 0; }
+  0% { transform: scale(0.96); opacity: 0; }
   100% { transform: scale(1); opacity: 1; }
 }
 @keyframes tickerin {
@@ -113,9 +140,11 @@ body::before {
 }
 @keyframes livepulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+  50% { opacity: 0.3; }
 }
+
 .animate-goalflash { animation: goalflash 1100ms ease-out; }
+.animate-scorebump { animation: scorebump 520ms cubic-bezier(0.2, 0.9, 0.3, 1.4); }
 .animate-popin { animation: popin 240ms cubic-bezier(0.2, 0.9, 0.3, 1.2); }
 .animate-tickerin { animation: tickerin 200ms ease-out; }
 .livedot { animation: livepulse 1.4s ease-in-out infinite; }

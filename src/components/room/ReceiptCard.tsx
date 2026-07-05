@@ -27,33 +27,27 @@ export function ReceiptCard({
   const scorer = round.goal?.scorer;
 
   return (
-    <div className="animate-popin card overflow-hidden p-0">
-      <div className="flex items-center justify-between border-b border-line bg-surface2 px-4 py-2.5">
-        <span className="flex items-center gap-2 text-sm font-semibold">
-          <span className="text-win">✓</span> Verifiable receipt
-        </span>
-        {round.receipt.mock ? (
-          <span className="chip border-gold/40 text-gold">MOCK PROOF</span>
-        ) : (
-          <span className="chip border-win/40 text-win">ON-CHAIN</span>
-        )}
+    <div className="animate-popin card overflow-hidden p-0" style={{ background: "#06080c" }}>
+      <div className="flex items-center justify-between border-b border-line px-4 py-3">
+        <span className="pill pill-lime">✓ VERIFIED ON-CHAIN</span>
+        {round.receipt.mock && <span className="pill text-faint">MOCK</span>}
       </div>
 
-      <div className="px-4 py-3">
+      <div className="px-4 py-4">
         <p className="text-sm">
           <span className="text-muted">Outcome proven: </span>
           <span className="font-semibold text-text">
             {scored} scored the next goal{scorer ? ` — ${scorer}` : ""} ({round.goal?.minute}&apos;)
           </span>
         </p>
-        <p className="mt-1 text-xs leading-relaxed text-muted">
+        <p className="mt-1.5 text-xs leading-relaxed text-muted">
           Verified against TxLINE&apos;s on-chain daily-scores Merkle root via a{" "}
           <span className="font-mono text-text">validate_stat</span> CPI —{" "}
-          <span className="text-neon">trust no oracle</span>. Anyone can re-derive it from the
-          proof below.
+          <span className="text-lime">trust no oracle — verifiable</span>. Anyone can re-derive it
+          from the proof below.
         </p>
 
-        <div className="mt-3 rounded-lg border border-line bg-bg/40 px-3 py-2">
+        <div className="mt-3 rounded-[12px] border border-line bg-[rgba(255,255,255,0.03)] px-3 py-2 font-mono">
           <Row k="program" v={`TxOracle · ${shortHex(TXORACLE_DEVNET, 4)}`} />
           <Row k="instruction" v="validate_stat" />
           <Row k="target_ts" v={String(p.targetTs)} />
@@ -64,7 +58,7 @@ export function ReceiptCard({
         </div>
 
         {round.receipt.mock && (
-          <p className="mt-2 text-center text-[11px] text-faint">
+          <p className="mt-2.5 text-center text-[11px] text-faint">
             Simulated feed → mock proof fixture. Live feed swaps in the real{" "}
             <span className="font-mono">/api/scores/stat-validation</span> proof.
           </p>
