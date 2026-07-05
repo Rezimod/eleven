@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
-use txline_settlement::{Comparison, FixtureSummary, Predicate, ProofNode, ValidateStatArgs};
+use txline_settlement::{
+    BinaryExpression, Comparison, FixtureSummary, Predicate, ProofNode, StatTerm, ValidateStatArgs,
+};
 
 use crate::{constants::*, error::ElevenError, state::Pool};
 
@@ -38,7 +40,7 @@ fn comparison_code(c: &Comparison) -> u8 {
     match c {
         Comparison::GreaterThan => 0,
         Comparison::LessThan => 1,
-        Comparison::Equal => 2,
+        Comparison::EqualTo => 2,
     }
 }
 
@@ -49,6 +51,9 @@ pub fn handle_settle_pool(
     fixture_proof: Vec<ProofNode>,
     main_tree_proof: Vec<ProofNode>,
     predicate: Predicate,
+    stat_a: StatTerm,
+    stat_b: Option<StatTerm>,
+    op: Option<BinaryExpression>,
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     {
@@ -57,8 +62,9 @@ pub fn handle_settle_pool(
         require!(now >= pool.deadline_ts, ElevenError::DeadlineNotReached);
         // Bind the caller-supplied predicate to what the market committed to, so
         // no one can settle against an easier claim than the pool was opened on.
+        // IDL `TraderPredicate.threshold` is i32; the pool commits it as i64.
         require!(
-            predicate.threshold == pool.threshold
+            i64::from(predicate.threshold) == pool.threshold
                 && comparison_code(&predicate.comparison) == pool.comparison,
             ElevenError::PredicateMismatch,
         );
@@ -72,11 +78,13 @@ pub fn handle_settle_pool(
         fixture_proof,
         main_tree_proof,
         predicate,
+        stat_a,
+        stat_b,
+        op,
     };
     txline_settlement::verify_stat(
         &ctx.accounts.txline_oracle.to_account_info(),
         &ctx.accounts.daily_scores_roots.to_account_info(),
-        &[], // TODO(idl): extra validate_stat accounts once the public IDL lands
         &args,
     )?;
 

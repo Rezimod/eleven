@@ -33,6 +33,16 @@ Two SSE frame types:
 - **data message** — `id` = `"timestamp:index"`, `data` = one `Scores` JSON object.
 - **heartbeat** — `event: heartbeat`, data like `{"Ts": 12345}`.
 
+> **Verified against a live devnet payload (2026-07):** the wire keys are **PascalCase**,
+> not the camelCase the field list below implies. A real frame looks like
+> `{"FixtureId":18187298,"Participant1IsHome":true,"GameState":"scheduled",`
+> `"Action":"players_warming_up","Clock":{"Running":false,"Seconds":0},"Data":{…},"Stats":{}}`.
+> The per-event soccer detail is under **`Data`** (not `dataSoccer`); the score, when present,
+> is under **`ScoreSoccer`**. `src/lib/feed/txline.ts` reads PascalCase first with a camelCase
+> fallback. Team names + schedule come from `GET /api/fixtures/snapshot?competitionId=&startEpochDay=`
+> (e.g. competition `72` = World Cup → Brazil v Norway, Portugal v Spain, …), proxied server-side
+> by `/api/txline/fixtures` so the browser never sees the token.
+
 ### `Scores` (event payload) — soccer-relevant fields
 
 ```
@@ -70,24 +80,32 @@ TxOracle program (single program, holds daily Merkle roots + validation ixs):
 
 Three-level Merkle hierarchy: main batch → per-fixture sub-tree → per-event stat sub-tree.
 
-### `validate_stat` accounts
+### `validate_stat` accounts — RESOLVED against the official IDL
 
-- `dailyScoresMerkleRoots` (PDA, read-only) — `findProgramAddressSync([b"daily_scores_roots", u16(epochDay).le(2)], programId)`
+Vendored: [`anchor/idl/txoracle.json`](../anchor/idl/txoracle.json) (from `txodds/tx-on-chain`).
+`validate_stat` takes **exactly one** account — the earlier "probably more accounts, order
+unknown" TODO is closed:
 
-### `validate_stat` args (in order)
+- `daily_scores_merkle_roots` (read-only) — `findProgramAddressSync([b"daily_scores_roots", u16(epochDay).le(2)], programId)`
+
+### `validate_stat` args (exact IDL order + types)
 
 ```
-target_ts:       BN (i64)
-fixture_summary: { fixtureId, updateStats, eventStatsSubTreeRoot }
-fixture_proof:   ProofNode[]      // validation.subTreeProof
-main_tree_proof: ProofNode[]      // validation.mainTreeProof
-predicate:       { threshold, comparison }
-stat1:           { statToProve, eventStatRoot, statProof }
-stat2:           Stat | null      // two-stat predicates (e.g. score diff)
-operator:        Operator | null  // e.g. { subtract: {} }
+ts:              i64
+fixture_summary: ScoresBatchSummary { fixture_id: i64, update_stats: ScoresUpdateStats{ update_count: i32, min_timestamp: i64, max_timestamp: i64 }, events_sub_tree_root: [u8;32] }
+fixture_proof:   ProofNode[]                    // validation.subTreeProof
+main_tree_proof: ProofNode[]                    // validation.mainTreeProof
+predicate:       TraderPredicate { threshold: i32, comparison: GreaterThan|LessThan|EqualTo }
+stat_a:          StatTerm { stat_to_prove: ScoreStat{ key: u32, value: i32, period: i32 }, event_stat_root: [u8;32], stat_proof: ProofNode[] }
+stat_b:          Option<StatTerm>               // two-stat predicates (e.g. score diff); None for "next goal"
+op:              Option<BinaryExpression>       // Add | Subtract; None for single-stat
 ```
 
-`ProofNode` = `{ hash: [u8;32], isRightSibling: bool }`.
+`ProofNode` = `{ hash: [u8;32], is_right_sibling: bool }`. Discriminator
+`[107,197,232,90,191,136,105,185]`. The Rust crate `anchor/crates/txline-settlement` and the
+TS SDK `src/lib/txline` now mirror this 1:1 (previously `stat_a`/`stat_b`/`op` were missing and
+`fixture_id`/`threshold`/`update_count` used the wrong widths — the CPI would have failed to
+deserialize on the real oracle).
 
 ### Fetching proofs
 
@@ -106,7 +124,8 @@ Reference impl: https://github.com/txodds/tx-on-chain
 
 ## ELEVEN mapping
 
-`eleven::settle_pool` (see `anchor/programs/eleven/src/instructions/settle_pool.rs`) will
-CPI `validate_stat` on the TxOracle program with the `dailyScoresMerkleRoots` PDA + the
-proof args above to prove a pool's `{ stat_key, period, threshold, comparison }` predicate,
-then release USDC escrow. CPI is a documented TODO until the TxOracle IDL is vendored.
+`eleven::settle_pool` (see `anchor/programs/eleven/src/instructions/settle_pool.rs`) CPIs
+`validate_stat` on the TxOracle program with the `daily_scores_merkle_roots` PDA + the proof
+args above to prove a pool's `{ stat_key, period, threshold, comparison }` predicate, then
+release escrow. The IDL is now vendored (`anchor/idl/txoracle.json`) and the CPI arg/account
+layout matches it exactly — the `TODO(idl)` is resolved and the 6 litesvm settlement tests pass.

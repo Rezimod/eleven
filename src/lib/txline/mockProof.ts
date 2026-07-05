@@ -35,5 +35,12 @@ export function mockSettleArgs(params: {
     fixtureProof: [node(11, true), node(12, false), node(13, true)],
     mainTreeProof: [node(21, false), node(22, true), node(23, false), node(24, true)],
     predicate: params.predicate,
+    statA: {
+      statToProve: { key: 1, value: 1, period: 0 }, // goals
+      eventStatRoot: bytes(31),
+      statProof: [node(41, true), node(42, false)],
+    },
+    statB: null, // single-stat "next goal" market
+    op: null,
   };
 }

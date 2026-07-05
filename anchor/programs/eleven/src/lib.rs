@@ -12,7 +12,7 @@ pub use state::*;
 /// Re-export the reusable settlement primitive so consumers (and tests) can use
 /// `eleven::settlement::{ValidateStatArgs, FixtureSummary, ProofNode, Predicate}`.
 pub use txline_settlement as settlement;
-use txline_settlement::{FixtureSummary, Predicate, ProofNode};
+use txline_settlement::{BinaryExpression, FixtureSummary, Predicate, ProofNode, StatTerm};
 
 declare_id!("2DoTb77aro9SoArLPQMucnCxoTDnvZvZskYtYhSdywRm");
 
@@ -29,8 +29,11 @@ pub mod eleven {
     /// scores Merkle root via a `validate_stat` CPI, then releases escrow to the
     /// winner. Reverts if the proof does not hold — settlement is trustless.
     ///
-    /// Args are the TxLINE proof bundle (fetch from `/api/scores/stat-validation`):
-    ///   `target_ts`, `fixture_summary`, `fixture_proof`, `main_tree_proof`, `predicate`.
+    /// Args are the TxLINE proof bundle (fetch from `/api/scores/stat-validation`),
+    /// in TxOracle `validate_stat` IDL order: `target_ts` (IDL `ts`),
+    /// `fixture_summary`, `fixture_proof`, `main_tree_proof`, `predicate`,
+    /// `stat_a`, `stat_b`, `op`. Single-stat markets (e.g. "next goal") pass
+    /// `stat_b = None`, `op = None`.
     pub fn settle_pool(
         ctx: Context<SettlePool>,
         target_ts: i64,
@@ -38,6 +41,9 @@ pub mod eleven {
         fixture_proof: Vec<ProofNode>,
         main_tree_proof: Vec<ProofNode>,
         predicate: Predicate,
+        stat_a: StatTerm,
+        stat_b: Option<StatTerm>,
+        op: Option<BinaryExpression>,
     ) -> Result<()> {
         instructions::settle_pool::handle_settle_pool(
             ctx,
@@ -46,6 +52,9 @@ pub mod eleven {
             fixture_proof,
             main_tree_proof,
             predicate,
+            stat_a,
+            stat_b,
+            op,
         )
     }
 }

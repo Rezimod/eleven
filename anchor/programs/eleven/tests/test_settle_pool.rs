@@ -10,7 +10,9 @@ use anchor_lang::{InstructionData, ToAccountMetas};
 use anchor_lang::prelude::Pubkey;
 
 use eleven::instructions::create_pool::CreatePoolArgs;
-use eleven::settlement::{Comparison, FixtureSummary, Predicate, ProofNode, ScoresUpdateStats};
+use eleven::settlement::{
+    Comparison, FixtureSummary, Predicate, ProofNode, ScoreStat, ScoresUpdateStats, StatTerm,
+};
 
 use litesvm::types::TransactionResult;
 use litesvm::LiteSVM;
@@ -96,9 +98,20 @@ fn proofs() -> Vec<ProofNode> {
 
 fn summary() -> FixtureSummary {
     FixtureSummary {
-        fixture_id: FIXTURE_ID,
+        fixture_id: FIXTURE_ID as i64,
         update_stats: ScoresUpdateStats { update_count: 1, min_timestamp: 0, max_timestamp: 10 },
-        event_stats_sub_tree_root: [0u8; 32],
+        events_sub_tree_root: [0u8; 32],
+    }
+}
+
+/// A single-stat proof term (goals). The mock oracle only checks that the
+/// fixture/main-tree proofs are non-empty, so `stat_a`'s contents are inert here
+/// but must be present to match the real `validate_stat` arg layout.
+fn stat_a() -> StatTerm {
+    StatTerm {
+        stat_to_prove: ScoreStat { key: STAT_KEY as u32, value: 1, period: 0 },
+        event_stat_root: [9u8; 32],
+        stat_proof: proofs(),
     }
 }
 
@@ -126,13 +139,16 @@ fn settle_ix(
             fixture_proof,
             main_tree_proof,
             predicate,
+            stat_a: stat_a(),
+            stat_b: None,
+            op: None,
         }
         .data(),
     }
 }
 
 fn good_predicate() -> Predicate {
-    Predicate { threshold: THRESHOLD, comparison: Comparison::GreaterThan }
+    Predicate { threshold: THRESHOLD as i32, comparison: Comparison::GreaterThan }
 }
 
 fn oracle() -> Pubkey {
@@ -212,7 +228,7 @@ fn reject_predicate_mismatch() {
     let mut env = setup(true);
     let settler = env.settler.insecure_clone();
     // Threshold differs from what the pool committed to.
-    let bad = Predicate { threshold: THRESHOLD + 5, comparison: Comparison::GreaterThan };
+    let bad = Predicate { threshold: (THRESHOLD + 5) as i32, comparison: Comparison::GreaterThan };
     let ix = settle_ix(&env, oracle(), proofs(), proofs(), bad);
     let res = send(&mut env.svm, &[ix], &settler, &[&settler]);
     expect_err_log(res, "PredicateMismatch");

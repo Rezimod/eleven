@@ -32,17 +32,41 @@ export interface FixtureSummary {
 }
 
 export interface Predicate {
+  /** IDL `TraderPredicate.threshold` (i32). */
   threshold: number | bigint;
   comparison: Comparison;
 }
 
-/** Exactly the arguments `eleven::settle_pool` expects, in order. */
+/** IDL `ScoreStat` — the proven stat leaf (`key` = stat kind, e.g. goals). */
+export interface ScoreStat {
+  key: number;
+  value: number;
+  period: number;
+}
+
+/** IDL `StatTerm` — a stat + its authentication path to the event sub-tree root. */
+export interface StatTerm {
+  statToProve: ScoreStat;
+  eventStatRoot: Uint8Array; // 32 bytes
+  statProof: ProofNode[];
+}
+
+export type BinaryExpression = "Add" | "Subtract";
+
+/**
+ * Exactly the arguments `eleven::settle_pool` expects, in TxOracle
+ * `validate_stat` IDL order. `statB`/`op` are set only for two-stat predicates;
+ * a single-stat market (e.g. "next goal") leaves them `null`.
+ */
 export interface SettleArgs {
   targetTs: number | bigint;
   fixtureSummary: FixtureSummary;
   fixtureProof: ProofNode[];
   mainTreeProof: ProofNode[];
   predicate: Predicate;
+  statA: StatTerm;
+  statB: StatTerm | null;
+  op: BinaryExpression | null;
 }
 
 // ── raw API response (GET /api/scores/stat-validation, legacy mode) ───────────
@@ -111,6 +135,17 @@ export function mapValidationToSettleArgs(v: RawValidation, predicate: Predicate
     fixtureProof: v.subTreeProof.map(mapNode), // leaf → fixture summary
     mainTreeProof: v.mainTreeProof.map(mapNode), // fixture summary → on-chain root
     predicate,
+    statA: {
+      statToProve: {
+        key: v.statToProve.key,
+        value: v.statToProve.value,
+        period: v.statToProve.period,
+      },
+      eventStatRoot: toBytes32(v.eventStatRoot),
+      statProof: v.statProof.map(mapNode),
+    },
+    statB: null, // single-stat "next goal" market
+    op: null,
   };
 }
 

@@ -15,11 +15,18 @@
 //! ```ignore
 //! txline_settlement::verify_stat(
 //!     &ctx.accounts.txline_oracle,        // TxOracle program (address-checked)
-//!     &ctx.accounts.daily_scores_roots,   // daily_scores_roots PDA (read-only)
-//!     &[],                                 // TODO(idl): extra accounts once public
-//!     &ValidateStatArgs { target_ts, fixture_summary, fixture_proof, main_tree_proof, predicate },
+//!     &ctx.accounts.daily_scores_roots,   // daily_scores_merkle_roots PDA (read-only)
+//!     &ValidateStatArgs { ts, fixture_summary, fixture_proof, main_tree_proof, predicate, stat_a, stat_b, op },
 //! )?; // reverts if the proof/predicate does not hold
 //! ```
+//!
+//! ## Provenance
+//!
+//! The types and CPI shape below are pinned 1:1 to the official TxOracle IDL
+//! (`txodds/tx-on-chain` → `idl/txoracle.json`, instruction `validate_stat`).
+//! This resolves the earlier `TODO(idl)`: `validate_stat` takes exactly **one**
+//! account (`daily_scores_merkle_roots`, read-only) and eight positional args,
+//! the last three of which (`stat_a`, `stat_b`, `op`) were missing before.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{
@@ -32,7 +39,7 @@ pub const TXORACLE_DEVNET: Pubkey = pubkey!("6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGv
 /// Verified TxOracle program id — mainnet. (docs: /documentation/programs/mainnet)
 pub const TXORACLE_MAINNET: Pubkey = pubkey!("9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA");
 
-/// PDA seed for TxOracle's per-epoch-day scores Merkle root (`dailyScoresMerkleRoots`).
+/// PDA seed for TxOracle's per-epoch-day scores Merkle root (`daily_scores_merkle_roots`).
 /// Derivation lives on the TxOracle program:
 ///   seeds = [DAILY_SCORES_ROOTS_SEED, (epoch_day: u16).to_le_bytes()]
 pub const DAILY_SCORES_ROOTS_SEED: &[u8] = b"daily_scores_roots";
@@ -41,28 +48,28 @@ pub const DAILY_SCORES_ROOTS_SEED: &[u8] = b"daily_scores_roots";
 pub const VALIDATE_STAT_IX_NAME: &str = "validate_stat";
 
 /// Anchor global instruction discriminator for `validate_stat`
-/// = `sha256("global:validate_stat")[..8]`. Anchor derives the callee's
-/// discriminator identically at compile time, so this matches the real TxOracle
-/// (and the `mock-txoracle` test double).
+/// = `sha256("global:validate_stat")[..8]`. Matches `idl/txoracle.json`'s
+/// `validate_stat` discriminator exactly, and Anchor derives the callee's
+/// discriminator identically at compile time (real TxOracle + `mock-txoracle`).
 pub const VALIDATE_STAT_DISCRIMINATOR: [u8; 8] = [107, 197, 232, 90, 191, 136, 105, 185];
 
-// ── Proof-argument schema (mirrors GET /api/scores/stat-validation) ──────────
+// ── Proof-argument schema (1:1 with idl/txoracle.json `validate_stat`) ────────
 
-/// `ScoresBatchSummary.updateStats` — bounds of the fixture's update window.
+/// IDL `ScoresUpdateStats` — bounds of the fixture's update window.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScoresUpdateStats {
-    pub update_count: u32,
+    pub update_count: i32,
     pub min_timestamp: i64,
     pub max_timestamp: i64,
 }
 
-/// `ScoresBatchSummary` — the per-fixture summary that roots the event sub-tree.
+/// IDL `ScoresBatchSummary` — the per-fixture summary that roots the event sub-tree.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct FixtureSummary {
-    pub fixture_id: u32,
+    pub fixture_id: i64,
     pub update_stats: ScoresUpdateStats,
-    /// `eventStatsSubTreeRoot`.
-    pub event_stats_sub_tree_root: [u8; 32],
+    /// IDL `events_sub_tree_root`.
+    pub events_sub_tree_root: [u8; 32],
 }
 
 /// One Merkle authentication node. `is_right_sibling` says which side to fold on.
@@ -72,25 +79,51 @@ pub struct ProofNode {
     pub is_right_sibling: bool,
 }
 
-/// How the proven stat is compared to the pool's threshold.
+/// IDL `Comparison` — how the proven stat is compared to the pool's threshold.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Comparison {
     GreaterThan,
     LessThan,
-    Equal,
+    EqualTo,
 }
 
-/// The market's claim: `stat <comparison> threshold`.
+/// IDL `TraderPredicate` — the market's claim: `stat <comparison> threshold`.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Predicate {
-    pub threshold: i64,
+    pub threshold: i32,
     pub comparison: Comparison,
 }
 
-/// Full argument bundle forwarded to `validate_stat`. Populate straight from the
-/// `/api/scores/stat-validation` response (see the TS SDK in `src/lib/txline`).
+/// IDL `ScoreStat` — the stat leaf being proven (`key` = stat kind, e.g. goals).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ScoreStat {
+    pub key: u32,
+    pub value: i32,
+    pub period: i32,
+}
+
+/// IDL `StatTerm` — one stat + its authentication path to the event sub-tree root.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct StatTerm {
+    pub stat_to_prove: ScoreStat,
+    pub event_stat_root: [u8; 32],
+    pub stat_proof: Vec<ProofNode>,
+}
+
+/// IDL `BinaryExpression` — combinator for two-stat predicates (e.g. score diff).
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinaryExpression {
+    Add,
+    Subtract,
+}
+
+/// Full argument bundle forwarded to `validate_stat`, in IDL order. Populate
+/// straight from the `/api/scores/stat-validation` response (see the TS SDK in
+/// `src/lib/txline`). `stat_b`/`op` are set only for two-stat predicates; a
+/// single-stat market (e.g. "next goal") leaves them `None`.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ValidateStatArgs {
+    /// IDL arg `ts`.
     pub target_ts: i64,
     pub fixture_summary: FixtureSummary,
     /// `validation.subTreeProof` — leaf → fixture summary.
@@ -98,31 +131,31 @@ pub struct ValidateStatArgs {
     /// `validation.mainTreeProof` — fixture summary → on-chain daily root.
     pub main_tree_proof: Vec<ProofNode>,
     pub predicate: Predicate,
+    /// `validation.{statToProve,eventStatRoot,statProof}` — the proven stat.
+    pub stat_a: StatTerm,
+    /// Second stat for binary predicates; `None` for single-stat markets.
+    pub stat_b: Option<StatTerm>,
+    /// Operator combining `stat_a`/`stat_b`; `None` for single-stat markets.
+    pub op: Option<BinaryExpression>,
 }
 
 // ── CPI machinery ────────────────────────────────────────────────────────────
 
 /// Build the TxOracle `validate_stat` instruction (data = discriminator ++ borsh(args)).
 ///
-/// Accounts:
-///   [0] `daily_scores_roots` (read-only) — the only account confirmed by the
-///        public docs. TODO(idl): `validate_stat` almost certainly takes more
-///        accounts; their order isn't in the public IDL yet. Append them via
-///        `extra_accounts` once known.
+/// Accounts (per `idl/txoracle.json`): exactly one — `daily_scores_merkle_roots`
+/// (read-only). The IDL declares no further accounts, so none are appended.
 pub fn build_validate_stat_ix(
     oracle_program: Pubkey,
     daily_scores_roots: Pubkey,
-    extra_accounts: &[AccountMeta],
     args: &ValidateStatArgs,
 ) -> Instruction {
     let mut data = VALIDATE_STAT_DISCRIMINATOR.to_vec();
     args.serialize(&mut data)
         .expect("ValidateStatArgs serialize into Vec is infallible");
-    let mut accounts = vec![AccountMeta::new_readonly(daily_scores_roots, false)];
-    accounts.extend_from_slice(extra_accounts);
     Instruction {
         program_id: oracle_program,
-        accounts,
+        accounts: vec![AccountMeta::new_readonly(daily_scores_roots, false)],
         data,
     }
 }
@@ -132,30 +165,18 @@ pub fn build_validate_stat_ix(
 pub fn verify_stat<'info>(
     oracle_program: &AccountInfo<'info>,
     daily_scores_roots: &AccountInfo<'info>,
-    extra_accounts: &[AccountInfo<'info>],
     args: &ValidateStatArgs,
 ) -> Result<()> {
-    let mut metas = Vec::with_capacity(1 + extra_accounts.len());
-    metas.push(AccountMeta::new_readonly(daily_scores_roots.key(), false));
-    for a in extra_accounts {
-        metas.push(AccountMeta::new_readonly(a.key(), a.is_signer));
-    }
-
     let mut data = VALIDATE_STAT_DISCRIMINATOR.to_vec();
     args.serialize(&mut data)
         .map_err(|_| ProgramError::InvalidInstructionData)?;
 
     let ix = Instruction {
         program_id: oracle_program.key(),
-        accounts: metas,
+        accounts: vec![AccountMeta::new_readonly(daily_scores_roots.key(), false)],
         data,
     };
 
-    let mut infos = Vec::with_capacity(2 + extra_accounts.len());
-    infos.push(oracle_program.clone());
-    infos.push(daily_scores_roots.clone());
-    infos.extend_from_slice(extra_accounts);
-
-    invoke(&ix, &infos)?;
+    invoke(&ix, &[oracle_program.clone(), daily_scores_roots.clone()])?;
     Ok(())
 }
