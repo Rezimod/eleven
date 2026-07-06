@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRoom } from "@/lib/room/useRoom";
+import { useLiveMarkets } from "@/lib/room/useLiveMarkets";
 import { TIERS } from "@/components/RoomCard";
 import { Wordmark, LivePill } from "@/components/Brand";
 import { ScoreHeader } from "@/components/room/ScoreHeader";
 import { PredictionSlip } from "@/components/room/PredictionSlip";
+import { StatsBar } from "@/components/room/StatsBar";
+import { LiveBets } from "@/components/room/LiveBets";
 import { Standings } from "@/components/room/PoolPanel";
 import { WinnerBanner } from "@/components/room/WinnerBanner";
 import { EventTicker } from "@/components/room/EventTicker";
@@ -16,11 +19,12 @@ const RAKE_BPS = 500; // 5%, capped at 10% on-chain
 export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string }) {
   const buyIn = (TIERS.find((t) => t.key === tier) ?? TIERS[0]).buyIn;
   const room = useRoom(fixtureId, `${fixtureId}-${tier}`, buyIn, RAKE_BPS);
+  const liveMarkets = useLiveMarkets(fixtureId, room.isReplay);
 
-  // Local tick so the commit countdown updates without feed events.
+  // Local tick so the commit + live-bet countdowns update without feed events.
   const [, setTick] = useState(0);
   useEffect(() => {
-    if (room.phase !== "commit") return;
+    if (room.phase === "ended") return;
     const t = setInterval(() => setTick((n) => n + 1), 500);
     return () => clearInterval(t);
   }, [room.phase]);
@@ -36,6 +40,7 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
         </Link>
         <div className="flex items-center gap-2">
           {competition && <span className="hidden text-xs text-faint sm:inline">{competition}</span>}
+          {room.isReplay && <span className="pill text-[10px] text-faint">REPLAY</span>}
           {room.clock.running && <LivePill minute={room.clock.minute} />}
         </div>
       </header>
@@ -81,6 +86,10 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
       {room.phase === "ended" && (
         <WinnerBanner winners={room.winners} payouts={room.payouts} buyIn={buyIn} rake={room.rake} />
       )}
+
+      {room.phase !== "ended" && <StatsBar home={homeShort || home} away={awayShort || away} stats={liveMarkets.stats} />}
+
+      {room.phase !== "ended" && <LiveBets markets={liveMarkets.live} />}
 
       {room.ready && <PredictionSlip markets={room.markets} phase={room.phase} onPredict={room.predict} />}
 

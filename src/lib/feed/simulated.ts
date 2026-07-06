@@ -3,6 +3,7 @@ import type {
   MatchEvent,
   MatchEventKind,
   MatchFeed,
+  MatchStats,
   MatchSummary,
   Score,
   Team,
@@ -144,6 +145,7 @@ export class SimulatedFeed implements MatchFeed {
   }
 
   subscribe(fixtureId: number, onEvent: (e: MatchEvent) => void): () => void {
+    // The sim always replays a scripted match; `opts.replay` is a no-op here.
     const m = this.match(fixtureId);
     if (!m) return () => {};
 
@@ -152,6 +154,25 @@ export class SimulatedFeed implements MatchFeed {
     let seq = 0;
     let goalCount = 0;
     const timers: ReturnType<typeof setTimeout>[] = [];
+
+    // Synthesized context stats (display-only + trigger-only). Real feed pulls
+    // these from TxLINE; here we derive plausible pressure signals so the live
+    // market generator is demoable with no token.
+    const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+    const stats: MatchStats = {
+      shots: 0,
+      shotsOnTarget: 0,
+      possessionHome: 50,
+      attacks: 0,
+      dangerousAttacks: 0,
+      momentum: 0,
+    };
+    const nudge = (team: Team | undefined, m: number) => {
+      if (team === "home") stats.momentum += m;
+      else if (team === "away") stats.momentum -= m;
+      stats.momentum = clamp(stats.momentum, -100, 100);
+      stats.possessionHome = clamp(50 + Math.round(stats.momentum / 4), 5, 95);
+    };
 
     const emit = (
       kind: MatchEventKind,
@@ -166,6 +187,7 @@ export class SimulatedFeed implements MatchFeed {
         minute: minuteAt(sec),
         clock: clockAt(sec),
         score: { ...score },
+        stats: { ...stats },
         ...extra,
       });
     };
@@ -178,6 +200,10 @@ export class SimulatedFeed implements MatchFeed {
     const interval = setInterval(() => {
       const elapsed = Math.round((Date.now() - start) / (1000 * factor));
       if (elapsed > MATCH_SECONDS) return;
+      // Momentum decays toward neutral between events; open play adds attacks.
+      stats.momentum = Math.trunc(stats.momentum * 0.9);
+      stats.attacks += 1;
+      stats.possessionHome = clamp(50 + Math.round(stats.momentum / 4), 5, 95);
       emit("clock", Math.min(elapsed, MATCH_SECONDS));
     }, 1000 * factor);
 
@@ -188,10 +214,24 @@ export class SimulatedFeed implements MatchFeed {
           const scorers = step.team === "home" ? m.homeScorers : m.awayScorers;
           const scorer = scorers[goalCount % scorers.length] ?? "Unknown";
           goalCount += 1;
+          stats.shots += 2;
+          stats.shotsOnTarget += 2; // SoT spike → the "goal in next N" template
+          stats.dangerousAttacks += 2;
+          nudge(step.team, 25);
           emit("goal", step.t, { team: step.team, goalType: step.goalType, scorer });
         } else if (step.kind === "fulltime") {
           emit("fulltime", step.t);
           clearInterval(interval);
+        } else if (step.kind === "corner") {
+          stats.shots += 1;
+          stats.attacks += 3;
+          stats.dangerousAttacks += 2; // pressure signal
+          nudge(step.team, 14);
+          emit(step.kind, step.t, { team: step.team });
+        } else if (step.kind === "card") {
+          stats.dangerousAttacks += 1;
+          nudge(step.team === "home" ? "away" : "home", 10); // tilts to the other side
+          emit(step.kind, step.t, { team: step.team, card: step.card });
         } else {
           emit(step.kind, step.t, { team: step.team, card: step.card });
         }

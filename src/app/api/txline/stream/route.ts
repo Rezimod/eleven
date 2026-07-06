@@ -21,6 +21,9 @@ export async function GET(req: NextRequest) {
 
   const origin = process.env.TXLINE_ORIGIN ?? "https://txline.txodds.com";
   const fixtureId = req.nextUrl.searchParams.get("fixtureId");
+  // Replay a finished fixture from kickoff (the "REPLAY" path) — resend the whole
+  // event history by resuming from event id 0, then it tails live if still running.
+  const replay = req.nextUrl.searchParams.get("replay") === "1";
 
   const jwtRes = await fetch(`${origin}/auth/guest/start`, {
     method: "POST",
@@ -33,14 +36,15 @@ export async function GET(req: NextRequest) {
   const url = new URL(`${origin}/api/scores/stream`);
   if (fixtureId) url.searchParams.set("fixtureId", fixtureId);
 
-  const upstream = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "X-Api-Token": apiToken,
-      Accept: "text/event-stream",
-      "Cache-Control": "no-cache",
-    },
-  });
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "X-Api-Token": apiToken,
+    Accept: "text/event-stream",
+    "Cache-Control": "no-cache",
+  };
+  if (replay) headers["Last-Event-ID"] = "0";
+
+  const upstream = await fetch(url, { headers });
   if (!upstream.ok || !upstream.body) {
     const body = await upstream.text().catch(() => "");
     return new Response(`upstream stream ${upstream.status}: ${body}`, { status: 502 });

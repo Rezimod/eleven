@@ -1,4 +1,4 @@
-import type { MatchClock, MatchEvent, MatchFeed, MatchSummary, Team } from "./types";
+import type { MatchClock, MatchEvent, MatchFeed, MatchStats, MatchSummary, Team } from "./types";
 
 /**
  * TxlineFeed — the real feed. Talks to two server-side proxies that hold the
@@ -87,6 +87,11 @@ interface RawScores {
   dataSoccer?: SoccerDetail;
   ScoreSoccer?: RawScore;
   scoreSoccer?: RawScore;
+  /** `stats: Map_ScoreStatKey` — keyed context stats (txline-notes §2). */
+  Stats?: Record<string, number>;
+  stats?: Record<string, number>;
+  Possession?: number;
+  possession?: number;
 }
 interface SoccerDetail {
   Goal?: boolean;
@@ -114,6 +119,30 @@ function teamFor(raw: RawScores, d: SoccerDetail | undefined): Team | undefined 
   return (part === 1) === homeIsP1 ? "home" : "away";
 }
 
+const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+
+/**
+ * Best-effort read of the live context stats (DISPLAY-ONLY / TRIGGER-ONLY — a
+ * market never settles on these). Reads the `stats` map + top-level `possession`;
+ * momentum is derived from possession. Confirm the exact stat-map key IDs against
+ * a live payload (see docs/DEMO.md) — unknown keys default to 0.
+ */
+export function parseStats(raw: RawScores): MatchStats | undefined {
+  const map = raw.Stats ?? raw.stats;
+  const poss = raw.Possession ?? raw.possession;
+  if (!map && poss === undefined) return undefined;
+  const g = (...keys: string[]) => keys.reduce((n, k) => n + Number(map?.[k] ?? 0), 0);
+  const possessionHome = typeof poss === "number" ? clamp(poss, 0, 100) : 50;
+  return {
+    shots: g("Shots", "shots"),
+    shotsOnTarget: g("ShotsOnTarget", "shotsOnTarget", "ShotsOnGoal"),
+    possessionHome,
+    attacks: g("Attacks", "attacks"),
+    dangerousAttacks: g("DangerousAttacks", "dangerousAttacks"),
+    momentum: clamp(Math.round((possessionHome - 50) * 2), -100, 100),
+  };
+}
+
 /** Parse a raw TxLINE `Scores` record into a MatchEvent (or null to skip). */
 export function parseScores(raw: RawScores): MatchEvent | null {
   const fixtureId = raw.FixtureId ?? raw.fixtureId ?? 0;
@@ -132,7 +161,7 @@ export function parseScores(raw: RawScores): MatchEvent | null {
     away: scoreOf(p1Home ? sc?.Participant2 : sc?.Participant1),
   };
   const ts = raw.Ts ?? raw.ts ?? Date.now();
-  const base = { ts, fixtureId, minute, clock, score };
+  const base = { ts, fixtureId, minute, clock, score, stats: parseStats(raw) };
 
   if (d?.Goal) {
     return { id: crypto.randomUUID(), kind: "goal", team: teamFor(raw, d), goalType: goalTypeName(d.GoalType), ...base };
@@ -165,8 +194,9 @@ export class TxlineFeed implements MatchFeed {
     return f ? fixtureToSummary(f) : null;
   }
 
-  subscribe(fixtureId: number, onEvent: (e: MatchEvent) => void): () => void {
-    const es = new EventSource(`/api/txline/stream?fixtureId=${fixtureId}`);
+  subscribe(fixtureId: number, onEvent: (e: MatchEvent) => void, opts?: { replay?: boolean }): () => void {
+    const q = opts?.replay ? `?fixtureId=${fixtureId}&replay=1` : `?fixtureId=${fixtureId}`;
+    const es = new EventSource(`/api/txline/stream${q}`);
     es.onmessage = (msg) => {
       try {
         const raw = JSON.parse(msg.data) as RawScores;

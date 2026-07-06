@@ -78,3 +78,23 @@ settlement path: the Merkle-proof CPI released escrow, no timeout, no operator. 
 devnet mock stands in for TxOracle's Merkle verifier — it accepts iff proof material
 is supplied; the byte-for-byte real-verifier path against a live World Cup stat +
 TxOracle `6pW64…` is unchanged and covered by the 14 litesvm tests.)
+
+## 4-player run (2026-07-06)
+
+Same programs, a **four-player** room — pot = 4 × buy-in, all three markets resolved
+via the ProveYes CPI, one clean winner.
+
+Room `79dqgPwGVM95S6BXJ3UA867Aptc6oEnErwEd6NBobrBR` · buy-in 0.02 · rake 5% · 4 players ·
+markets corners>4 / red-card / home-goals>2 →
+https://solscan.io/account/79dqgPwGVM95S6BXJ3UA867Aptc6oEnErwEd6NBobrBR?cluster=devnet
+
+Keeper (all ProveYes) + settle:
+- resolve m0 corners>4 `KL8tcgJJQxWYULehq7LcZAuPbycFePWCFYdAxisjCFBy7ohRY3ReKB2K4VfDS5QxbcdW7HmCZdmECLMB8juyd9i`
+- resolve m1 red-card `4L3JssMCSxVMu2KsizATpaY4g995vxRM9B4znsUuRwbSnPPa738H4imWp4VAQLsfBgwro9JfmDbwjpEjGLgUfspK`
+- resolve m2 home-goals>2 `2RT5DDchWEjH432Ksz9hF9YLgYnawu8Kg9jCrnmN1rUqJjoSZEFUDQdY4wNeKEATgeNfotuqmYVZY436VwWT89eh`
+- **settle_room** `4xuWeArtnDLyqRJZQophpF6v9LM6uGFd2HqMpwc2UFPkvux9eNVi5RFyfoMKLBZ2sD1rMFJa5FZMJWrRBeJ1vEA8`
+
+Result: settled, pot_lamports 0, outcomes YES/YES/YES · points P1=300 (winner), P2=200,
+P3=100, P4=0 · **pot 0.08 = winner take 0.076 + rake 0.004** (treasury 0.0015 prefund +
+0.004 = 0.0055) · conservation ✓. Reproduce with `apps/keeper/scripts/seed-room-4p.ts`
+→ keeper `keeper.config.devnet-4p.json` → `verify-4p.ts`.

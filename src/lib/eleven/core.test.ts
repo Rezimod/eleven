@@ -174,3 +174,55 @@ test("splitPot: exact rake, cap enforced, conservation", () => {
 test("scoring is deterministic across runs", () => {
   assert.deepEqual(standings(scenario()), standings(scenario()));
 });
+
+// ── 4-player rooms ─────────────────────────────────────────────────────────────
+
+function fourPlayer(buyIn = 1_000) {
+  // 3 markets, all resolve YES. Picks give a clean single winner.
+  const markets = [mkt("m0", 100, 100), mkt("m1", 100, 100), mkt("m2", 100, 100)];
+  let r = createRoom(cfg({ buyIn, maxPlayers: 4, markets }));
+  for (const p of ["bob", "carol", "dave"]) r = joinRoom(r, p, 500);
+  const picks: Record<string, ("yes" | "no")[]> = {
+    alice: ["yes", "yes", "yes"], // 300 — winner
+    bob: ["yes", "yes", "no"], // 200
+    carol: ["yes", "no", "no"], // 100
+    dave: ["no", "no", "no"], // 0
+  };
+  for (const [player, sides] of Object.entries(picks)) {
+    sides.forEach((side, i) => (r = predict(r, player, `m${i}`, side, 1_500)));
+  }
+  for (const id of ["m0", "m1", "m2"]) r = resolveMarket(r, id, true);
+  return r;
+}
+
+test("4-player pot = 4× buy-in, single winner takes pot − rake, conserved", () => {
+  const r = fourPlayer(1_000);
+  assert.equal(r.players.length, 4);
+  const s = settle(r);
+  assert.equal(s.pot, 4_000, "pot = 4 × buy-in");
+  assert.equal(s.rake, Math.floor((4_000 * 500) / 10_000)); // 200
+  assert.deepEqual(s.winners, ["alice"]);
+  assert.equal(s.payouts[0].amount, s.pot - s.rake); // 3_800
+  const paid = s.payouts.reduce((a, p) => a + p.amount, 0);
+  assert.equal(paid + s.rake, s.pot, "conservation: payouts + rake = pot");
+});
+
+test("4-player tie splits equally, dust to first winners, pot conserved", () => {
+  // Two players tie on top; rake makes the split non-even so dust is exercised.
+  const markets = [mkt("m0", 100, 100)];
+  let r = createRoom(cfg({ buyIn: 1_000, rakeBps: 500, maxPlayers: 4, markets }));
+  for (const p of ["bob", "carol", "dave"]) r = joinRoom(r, p, 500);
+  r = predict(r, "alice", "m0", "yes", 1_500);
+  r = predict(r, "bob", "m0", "yes", 1_500); // alice & bob tie
+  r = predict(r, "carol", "m0", "no", 1_500);
+  r = predict(r, "dave", "m0", "no", 1_500);
+  r = resolveMarket(r, "m0", true);
+
+  const s = settle(r);
+  assert.equal(s.pot, 4_000);
+  assert.deepEqual(s.winners, ["alice", "bob"]);
+  const paid = s.payouts.reduce((a, p) => a + p.amount, 0);
+  assert.equal(paid + s.rake, s.pot, "pot fully conserved across the tie");
+  const amounts = s.payouts.map((p) => p.amount).sort((a, b) => a - b);
+  assert.ok(amounts[1] - amounts[0] <= 1, "shares differ by at most the dust");
+});

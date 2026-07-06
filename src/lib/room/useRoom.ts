@@ -83,6 +83,7 @@ interface State {
   homeShort: string;
   awayShort: string;
   competition: string;
+  status: "live" | "upcoming" | "final";
   score: Score;
   clock: MatchClock;
   events: MatchEvent[];
@@ -97,7 +98,7 @@ interface State {
 }
 
 type Action =
-  | { type: "INIT"; home: string; away: string; homeShort: string; awayShort: string; competition: string; now: number; buyIn: number; rakeBps: number }
+  | { type: "INIT"; home: string; away: string; homeShort: string; awayShort: string; competition: string; status: "live" | "upcoming" | "final"; now: number; buyIn: number; rakeBps: number }
   | { type: "PREDICT"; marketId: string; side: Side; now: number }
   | { type: "LOCK_BOTS"; now: number }
   | { type: "EVENT"; e: MatchEvent };
@@ -111,6 +112,7 @@ function initial(fixtureId: number, roomId: string): State {
     homeShort: "",
     awayShort: "",
     competition: "",
+    status: "live",
     score: { home: 0, away: 0 },
     clock: { minute: 0, period: "PRE", running: false },
     events: [],
@@ -165,7 +167,7 @@ function reducer(state: State, a: Action): State {
         markets: defs.map((d) => d.spec),
       });
       for (const b of BOTS.slice(0, 5)) room = joinRoom(room, b, Math.floor(a.now / 1000));
-      return { ...state, home: a.home, away: a.away, homeShort: a.homeShort, awayShort: a.awayShort, competition: a.competition, lockTs, defs, room, ready: true };
+      return { ...state, home: a.home, away: a.away, homeShort: a.homeShort, awayShort: a.awayShort, competition: a.competition, status: a.status, lockTs, defs, room, ready: true };
     }
     case "PREDICT": {
       if (!state.room || a.now / 1000 >= state.lockTs) return state;
@@ -234,6 +236,8 @@ export interface MarketView {
 export interface RoomView {
   ready: boolean;
   match: { home: string; away: string; homeShort: string; awayShort: string; competition: string };
+  status: "live" | "upcoming" | "final";
+  isReplay: boolean;
   score: Score;
   clock: MatchClock;
   events: MatchEvent[];
@@ -258,11 +262,13 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
   useEffect(() => {
     const feed = getFeed();
     let alive = true;
+    let unsub = () => {};
     feed.getMatch(fixtureId).then((m) => {
-      if (alive && m)
-        dispatch({ type: "INIT", home: m.home, away: m.away, homeShort: m.homeShort, awayShort: m.awayShort, competition: m.competition, now: Date.now(), buyIn, rakeBps });
+      if (!alive || !m) return;
+      dispatch({ type: "INIT", home: m.home, away: m.away, homeShort: m.homeShort, awayShort: m.awayShort, competition: m.competition, status: m.status, now: Date.now(), buyIn, rakeBps });
+      // A finished fixture replays from kickoff (REPLAY); a live one tails live.
+      unsub = feed.subscribe(fixtureId, (e) => dispatch({ type: "EVENT", e }), { replay: m.status === "final" });
     });
-    const unsub = feed.subscribe(fixtureId, (e) => dispatch({ type: "EVENT", e }));
     return () => {
       alive = false;
       unsub();
@@ -316,6 +322,8 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
     return {
       ready: state.ready,
       match: { home: state.home, away: state.away, homeShort: state.homeShort, awayShort: state.awayShort, competition: state.competition },
+      status: state.status,
+      isReplay: feedMode() === "live" && state.status === "final",
       score: state.score,
       clock: state.clock,
       events: state.events,
