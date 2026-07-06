@@ -16,6 +16,125 @@
   ],
   "instructions": [
     {
+      "name": "advance_phase",
+      "docs": [
+        "Sync the room phase to the clock (Lobby → Live → FullTime). Permissionless."
+      ],
+      "discriminator": [
+        91,
+        6,
+        51,
+        226,
+        144,
+        243,
+        74,
+        113
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "signer": true
+        },
+        {
+          "name": "room",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  111,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room.authority",
+                "account": "Room"
+              },
+              {
+                "kind": "account",
+                "path": "room.room_id",
+                "account": "Room"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "commit_live_root",
+      "docs": [
+        "Commit a LIVE wave's per-lock Merkle root of pick commitments (one tx per",
+        "wave, not per bet). Individual picks reveal against it at settlement."
+      ],
+      "discriminator": [
+        97,
+        83,
+        148,
+        236,
+        44,
+        33,
+        217,
+        51
+      ],
+      "accounts": [
+        {
+          "name": "settler",
+          "docs": [
+            "Permissionless — the room/keeper posts the wave root; it commits to picks",
+            "players already signed off-chain, so no trust is placed in the caller."
+          ],
+          "signer": true
+        },
+        {
+          "name": "room",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  111,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room.authority",
+                "account": "Room"
+              },
+              {
+                "kind": "account",
+                "path": "room.room_id",
+                "account": "Room"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "market_index",
+          "type": "u16"
+        },
+        {
+          "name": "root",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "commit_prediction",
       "docs": [
         "Commit a hashed prediction on a market — must land before the lock."
@@ -497,6 +616,158 @@
       ]
     },
     {
+      "name": "reveal_live_pick",
+      "docs": [
+        "Reveal a LIVE pick against its wave's committed Merkle root and score it",
+        "(frozen, capped points). Its `LivePick` guard makes it once-only."
+      ],
+      "discriminator": [
+        102,
+        49,
+        180,
+        103,
+        104,
+        249,
+        180,
+        114
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "room",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  111,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room.authority",
+                "account": "Room"
+              },
+              {
+                "kind": "account",
+                "path": "room.room_id",
+                "account": "Room"
+              }
+            ]
+          }
+        },
+        {
+          "name": "participant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  114,
+                  116,
+                  105,
+                  99,
+                  105,
+                  112,
+                  97,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "live_pick",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  118,
+                  101,
+                  112,
+                  105,
+                  99,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "room"
+              },
+              {
+                "kind": "arg",
+                "path": "market_index"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "market_index",
+          "type": "u16"
+        },
+        {
+          "name": "side",
+          "type": "u8"
+        },
+        {
+          "name": "award_points",
+          "type": "u32"
+        },
+        {
+          "name": "salt",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "proof",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "ProofNode"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "reveal_prediction",
       "docs": [
         "Reveal a committed prediction — also before the lock, and must match the hash."
@@ -661,6 +932,19 @@
   ],
   "accounts": [
     {
+      "name": "LivePick",
+      "discriminator": [
+        57,
+        114,
+        18,
+        73,
+        144,
+        86,
+        3,
+        154
+      ]
+    },
+    {
       "name": "Participant",
       "discriminator": [
         32,
@@ -783,66 +1067,111 @@
     },
     {
       "code": 6016,
+      "name": "PreMatchLockNotKickoff",
+      "msg": "A pre-match market must lock exactly at kickoff"
+    },
+    {
+      "code": 6017,
+      "name": "NotLiveMarket",
+      "msg": "Expected a live-wave market"
+    },
+    {
+      "code": 6018,
+      "name": "NotPreMatchMarket",
+      "msg": "Expected a pre-match market"
+    },
+    {
+      "code": 6019,
+      "name": "RootAlreadyCommitted",
+      "msg": "Live wave root already committed"
+    },
+    {
+      "code": 6020,
+      "name": "RootNotCommitted",
+      "msg": "Live wave root not committed"
+    },
+    {
+      "code": 6021,
+      "name": "BadMerkleProof",
+      "msg": "Live pick does not verify against the committed Merkle root"
+    },
+    {
+      "code": 6022,
+      "name": "PointsCapExceeded",
+      "msg": "Frozen points exceed the per-market cap"
+    },
+    {
+      "code": 6023,
+      "name": "MarketNotResolved",
+      "msg": "Market has not been resolved yet"
+    },
+    {
+      "code": 6024,
+      "name": "WrongPhase",
+      "msg": "Room is not in the expected phase"
+    },
+    {
+      "code": 6025,
       "name": "InvalidOracleProgram",
       "msg": "Provided oracle account does not match the TxLINE program id"
     },
     {
-      "code": 6017,
+      "code": 6026,
       "name": "PredicateMismatch",
       "msg": "Provided predicate does not match the market's committed predicate"
     },
     {
-      "code": 6018,
+      "code": 6027,
       "name": "TimeoutNotReached",
       "msg": "Timeout resolution requires the resolve deadline to have passed"
     },
     {
-      "code": 6019,
+      "code": 6028,
       "name": "EndNotReached",
       "msg": "Full time has not been reached yet"
     },
     {
-      "code": 6020,
+      "code": 6029,
       "name": "AccountCountMismatch",
       "msg": "Wrong number of scoring/settlement accounts supplied"
     },
     {
-      "code": 6021,
+      "code": 6030,
       "name": "BadAccountOwner",
       "msg": "A supplied account is not owned by this program"
     },
     {
-      "code": 6022,
+      "code": 6031,
       "name": "UnsortedOrDuplicate",
       "msg": "Accounts must be sorted by owner and unique"
     },
     {
-      "code": 6023,
+      "code": 6032,
       "name": "AccountMismatch",
       "msg": "A supplied account does not belong to this room/market"
     },
     {
-      "code": 6024,
+      "code": 6033,
       "name": "WalletMismatch",
       "msg": "Wallet does not match the participant owner"
     },
     {
-      "code": 6025,
+      "code": 6034,
       "name": "TreasuryMismatch",
       "msg": "Treasury account does not match the room treasury"
     },
     {
-      "code": 6026,
+      "code": 6035,
       "name": "RefundNotAvailable",
       "msg": "Refund is not available yet"
     },
     {
-      "code": 6027,
+      "code": 6036,
       "name": "AlreadyRefunded",
       "msg": "Participant already refunded"
     },
     {
-      "code": 6028,
+      "code": 6037,
       "name": "MathOverflow",
       "msg": "Arithmetic overflow"
     }
@@ -892,6 +1221,10 @@
           },
           {
             "name": "join_deadline_ts",
+            "type": "i64"
+          },
+          {
+            "name": "kickoff_ts",
             "type": "i64"
           },
           {
@@ -950,6 +1283,42 @@
                 32
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LivePick",
+      "docs": [
+        "Dedup guard for a LIVE pick revealed against a market's Merkle root — its mere",
+        "existence proves this (owner, market) already scored, so a pick can't be",
+        "revealed twice. Created by `reveal_live_pick`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "room",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "market_index",
+            "type": "u16"
+          },
+          {
+            "name": "award_points",
+            "docs": [
+              "Frozen points this pick locked (already clamped); mirrored for auditing."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
@@ -1030,7 +1399,8 @@
             "name": "yes_points",
             "docs": [
               "Points a correct `yes`/`no` predictor earns — scaled by odds off-chain,",
-              "applied verbatim on-chain (longer odds → more points). Stake never adds."
+              "applied verbatim on-chain (longer odds → more points). Stake never adds.",
+              "Frozen onto each prediction at reveal (`Prediction.award_points`), capped."
             ],
             "type": "u32"
           },
@@ -1054,6 +1424,32 @@
             "docs": [
               "The proven outcome: true = predicate held (`yes`), false = did not (`no`)."
             ],
+            "type": "bool"
+          },
+          {
+            "name": "is_live",
+            "docs": [
+              "PRE-MATCH (false) vs LIVE-WAVE (true). Pre-match markets lock at kickoff and",
+              "use per-player commit/reveal; live markets use a per-lock Merkle root of",
+              "picks (no per-bet transaction) and are scored via `reveal_live_pick`."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "commit_root",
+            "docs": [
+              "LIVE only: the per-lock Merkle root of that wave's pick commitments,",
+              "committed on-chain at the lock. Picks reveal against it at settlement."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "root_committed",
             "type": "bool"
           }
         ]
@@ -1114,6 +1510,13 @@
           {
             "name": "no_points",
             "type": "u32"
+          },
+          {
+            "name": "is_live",
+            "docs": [
+              "PRE-MATCH (false, locks at kickoff) vs LIVE-WAVE (true, later short lock)."
+            ],
+            "type": "bool"
           }
         ]
       }
@@ -1205,6 +1608,15 @@
           {
             "name": "scored",
             "type": "bool"
+          },
+          {
+            "name": "award_points",
+            "docs": [
+              "FROZEN odds snapshot: the points this pick earns if correct, snapshotted at",
+              "reveal (clamped to `MAX_POINTS_PER_MARKET`) and NEVER recomputed. Scoring",
+              "reads this, so stake — or a later, bigger bet — can never change it."
+            ],
+            "type": "u32"
           },
           {
             "name": "bump",
@@ -1388,9 +1800,16 @@
             "type": "i64"
           },
           {
+            "name": "kickoff_ts",
+            "docs": [
+              "Kickoff — every PRE-MATCH market locks here (enforced on-chain). Lobby → Live."
+            ],
+            "type": "i64"
+          },
+          {
             "name": "end_ts",
             "docs": [
-              "Full time — `settle_room` is only allowed after this."
+              "Full time — `settle_room` is only allowed after this. Live → FullTime."
             ],
             "type": "i64"
           },
@@ -1413,10 +1832,13 @@
             "type": "u16"
           },
           {
-            "name": "state",
+            "name": "phase",
+            "docs": [
+              "The on-chain state machine: Lobby → Live → FullTime → Settled (or Refunding)."
+            ],
             "type": {
               "defined": {
-                "name": "RoomState"
+                "name": "RoomPhase"
               }
             }
           },
@@ -1442,15 +1864,22 @@
       }
     },
     {
-      "name": "RoomState",
+      "name": "RoomPhase",
       "docs": [
-        "Room lifecycle state."
+        "Room phase — the on-chain state machine: Lobby → Live → FullTime → Settled.",
+        "`Refunding` is the void branch (unfilled/timed-out) off Lobby/Live."
       ],
       "type": {
         "kind": "enum",
         "variants": [
           {
-            "name": "Open"
+            "name": "Lobby"
+          },
+          {
+            "name": "Live"
+          },
+          {
+            "name": "FullTime"
           },
           {
             "name": "Settled"
@@ -1547,6 +1976,15 @@
     }
   ],
   "constants": [
+    {
+      "name": "LIVE_PICK_SEED",
+      "docs": [
+        "LivePick PDA seed: `[LIVE_PICK_SEED, room, market_index.le(2), owner]` — the",
+        "once-only guard for a live pick revealed against a market's Merkle root."
+      ],
+      "type": "bytes",
+      "value": "[108, 105, 118, 101, 112, 105, 99, 107]"
+    },
     {
       "name": "PARTICIPANT_SEED",
       "docs": [

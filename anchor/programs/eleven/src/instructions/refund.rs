@@ -35,7 +35,7 @@ pub fn handle_refund(ctx: Context<Refund>) -> Result<()> {
     let room = &ctx.accounts.room;
 
     require!(!room.settled, ElevenError::RoomAlreadySettled);
-    require!(room.state != RoomState::Settled, ElevenError::BadRoomState);
+    require!(room.phase != RoomPhase::Settled, ElevenError::WrongPhase);
     // Refunds only open once the room is provably not going to run as intended:
     //   - unfilled (never reached MIN_PLAYERS) after the join window, OR
     //   - voided: not settled by the refund timelock.
@@ -53,7 +53,7 @@ pub fn handle_refund(ctx: Context<Refund>) -> Result<()> {
     }
 
     let room = &mut ctx.accounts.room;
-    room.state = RoomState::Refunding;
+    room.phase = RoomPhase::Refunding;
     room.pot_lamports = room
         .pot_lamports
         .checked_sub(amount)

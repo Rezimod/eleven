@@ -9,6 +9,10 @@ pub const PARTICIPANT_SEED: &[u8] = b"participant";
 /// Prediction PDA seed: `[PREDICTION_SEED, room, market_index.le(2), owner]`.
 #[constant]
 pub const PREDICTION_SEED: &[u8] = b"prediction";
+/// LivePick PDA seed: `[LIVE_PICK_SEED, room, market_index.le(2), owner]` — the
+/// once-only guard for a live pick revealed against a market's Merkle root.
+#[constant]
+pub const LIVE_PICK_SEED: &[u8] = b"livepick";
 
 /// Rake is capped on-chain at 10% (basis points). No room can charge more.
 pub const MAX_RAKE_BPS: u16 = 1_000;
@@ -19,6 +23,11 @@ pub const MIN_PLAYERS: u16 = 2;
 pub const MAX_PLAYERS: u16 = 16;
 /// Hard cap on markets per room — bounds Room account size.
 pub const MAX_MARKETS: usize = 8;
+
+/// ANTI-DRAIN: the most points a single market can award a player. A longshot's
+/// frozen odds snapshot is clamped to this at reveal, so no one market can
+/// dominate the pot. Matches the core engine's `MAX_MARKET_POINTS`.
+pub const MAX_POINTS_PER_MARKET: u32 = 1_000;
 
 /// The TxOracle program `resolve_market` CPIs into (devnet for the hackathon;
 /// swap to `txline_settlement::TXORACLE_MAINNET` for production). Verified in

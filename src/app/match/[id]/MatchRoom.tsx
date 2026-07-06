@@ -31,6 +31,8 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
 
   const { home, away, homeShort, awayShort, competition } = room.match;
   const secsToLock = Math.max(0, Math.ceil((room.lockAt - Date.now()) / 1000));
+  // The room state machine: Lobby (pre-match) → Live → FullTime.
+  const gamePhase = room.phase === "ended" ? "fulltime" : room.phase === "commit" ? "lobby" : "live";
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-4 px-4 pb-16 pt-5">
@@ -54,6 +56,23 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
         score={room.score}
         clock={room.clock}
       />
+
+      {/* Room state machine: Lobby → Live → FullTime */}
+      <div className="flex items-center gap-1.5 text-[11px]">
+        {(["lobby", "live", "fulltime"] as const).map((p, i) => {
+          const active = p === gamePhase;
+          const label = p === "lobby" ? "LOBBY" : p === "live" ? "LIVE" : "FULL TIME";
+          return (
+            <div key={p} className="flex items-center gap-1.5">
+              {i > 0 && <span className="text-faint">→</span>}
+              <span className={`pill ${active ? "pill-lime" : "text-faint"}`}>{label}</span>
+            </div>
+          );
+        })}
+        <span className="ml-auto text-faint">
+          {gamePhase === "lobby" ? "pre-match bets" : gamePhase === "live" ? "live waves" : "settling"}
+        </span>
+      </div>
 
       {/* Room meta */}
       <div className="card flex items-center justify-between p-4 text-sm">

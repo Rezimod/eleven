@@ -40,14 +40,15 @@ pub fn handle_commit_prediction(
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let room = &ctx.accounts.room;
-    require!(room.state == RoomState::Open, ElevenError::BadRoomState);
 
     let market = room
         .markets
         .get(market_index as usize)
         .ok_or(ElevenError::BadMarketIndex)?;
+    // Per-player commit/reveal is the PRE-MATCH path; live waves use a Merkle root.
+    require!(!market.is_live, ElevenError::NotPreMatchMarket);
     require!(!market.resolved, ElevenError::MarketAlreadyResolved);
-    // The on-chain lock: you cannot commit after the event window opens.
+    // The on-chain lock: pre-match markets lock at kickoff — no commit after it.
     require!(now < market.lock_ts, ElevenError::MarketLocked);
 
     let p = &mut ctx.accounts.prediction;
@@ -58,6 +59,7 @@ pub fn handle_commit_prediction(
     p.revealed = false;
     p.side = 0;
     p.scored = false;
+    p.award_points = 0;
     p.bump = ctx.bumps.prediction;
     Ok(())
 }

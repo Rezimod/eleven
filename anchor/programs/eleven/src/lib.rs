@@ -1,6 +1,7 @@
 pub mod constants;
 pub mod error;
 pub mod instructions;
+pub mod merkle;
 pub mod state;
 
 use anchor_lang::prelude::*;
@@ -36,6 +37,11 @@ pub mod eleven {
         instructions::join_room::handle_join_room(ctx)
     }
 
+    /// Sync the room phase to the clock (Lobby → Live → FullTime). Permissionless.
+    pub fn advance_phase(ctx: Context<AdvancePhase>) -> Result<()> {
+        instructions::advance_phase::handle_advance_phase(ctx)
+    }
+
     /// Commit a hashed prediction on a market — must land before the lock.
     pub fn commit_prediction(
         ctx: Context<CommitPrediction>,
@@ -55,6 +61,16 @@ pub mod eleven {
         instructions::reveal_prediction::handle_reveal_prediction(ctx, market_index, side, salt)
     }
 
+    /// Commit a LIVE wave's per-lock Merkle root of pick commitments (one tx per
+    /// wave, not per bet). Individual picks reveal against it at settlement.
+    pub fn commit_live_root(
+        ctx: Context<CommitLiveRoot>,
+        market_index: u16,
+        root: [u8; 32],
+    ) -> Result<()> {
+        instructions::commit_live_root::handle_commit_live_root(ctx, market_index, root)
+    }
+
     /// Resolve a market once: prove `yes` via a `validate_stat` Merkle proof, or
     /// resolve `no` by public timeout. Scores every revealed prediction.
     pub fn resolve_market<'info>(
@@ -62,6 +78,21 @@ pub mod eleven {
         args: ResolveMarketArgs,
     ) -> Result<()> {
         instructions::resolve_market::handle_resolve_market(ctx, args)
+    }
+
+    /// Reveal a LIVE pick against its wave's committed Merkle root and score it
+    /// (frozen, capped points). Its `LivePick` guard makes it once-only.
+    pub fn reveal_live_pick(
+        ctx: Context<RevealLivePick>,
+        market_index: u16,
+        side: u8,
+        award_points: u32,
+        salt: [u8; 32],
+        proof: Vec<txline_settlement::ProofNode>,
+    ) -> Result<()> {
+        instructions::reveal_live_pick::handle_reveal_live_pick(
+            ctx, market_index, side, award_points, salt, proof,
+        )
     }
 
     /// Settle a room once all markets are resolved: pay the top-scoring player(s)

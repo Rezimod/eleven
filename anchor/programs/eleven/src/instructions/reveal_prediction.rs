@@ -45,6 +45,7 @@ pub fn handle_reveal_prediction(
         .markets
         .get_mut(market_index as usize)
         .ok_or(ElevenError::BadMarketIndex)?;
+    require!(!market.is_live, ElevenError::NotPreMatchMarket);
     require!(!market.resolved, ElevenError::MarketAlreadyResolved);
     // Same lock as commit: no revealing after the event window opens.
     require!(now < market.lock_ts, ElevenError::MarketLocked);
@@ -56,6 +57,10 @@ pub fn handle_reveal_prediction(
 
     p.side = side;
     p.revealed = true;
+    // FREEZE the odds snapshot now (clamped) — scoring reads this verbatim, so a
+    // later/bigger bet can never change what this pick is worth.
+    let raw = if side == 1 { market.yes_points } else { market.no_points };
+    p.award_points = raw.min(MAX_POINTS_PER_MARKET);
     market.reveal_count = market
         .reveal_count
         .checked_add(1)

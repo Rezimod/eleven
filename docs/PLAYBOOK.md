@@ -157,7 +157,17 @@ The `eleven` program is the room engine. It handles user funds, so fairness + se
 - **Participant** (PDA `["participant", room, owner]`) — `points` (start 0, only from correct predictions), `buy_in_paid` (for exact refunds).
 - **Prediction** (PDA `["prediction", room, market_index, owner]`) — a commit-reveal pick: `commitment = sha256(side ++ salt ++ owner ++ market_index)`, then the revealed `side`.
 
-**Instructions.** `create_room` (creator is player #1, same buy-in) · `join_room` · `commit_prediction` · `reveal_prediction` · `resolve_market` (validate_stat CPI → `yes`, or public timeout → `no`; scores every revealed prediction) · `settle_room` (pays top scorer(s) pot − rake, ties split, rake → treasury) · `refund` (timelocked, exact buy-in back).
+**Instructions.** `create_room` (creator is player #1, same buy-in) · `join_room` · `advance_phase` (crank Lobby→Live→FullTime) · `commit_prediction` / `reveal_prediction` (PRE-MATCH picks) · `commit_live_root` / `reveal_live_pick` (LIVE picks via a per-lock Merkle root) · `resolve_market` (validate_stat CPI → `yes`, or public timeout → `no`) · `settle_room` (pays top scorer(s) pot − rake, ties split, rake → treasury) · `refund` (timelocked, exact buy-in back).
+
+**Two-phase mechanic (the game).** A room is an on-chain state machine — **Lobby → Live → FullTime → Settled**:
+
+- **Lobby** — create/join and place **pre-match** predictions on the match-long menu (total goals O/U, total corners O/U, red card in match, both-teams-to-score, next-goal team). Every pre-match market **locks exactly at kickoff** (enforced on-chain: `pre_match_lock == kickoff_ts`); no commit/reveal after.
+- **Live** — the smart generator opens **broader live markets in waves** (goal-in-next-10m, who-scores-next, next-event-is-a-corner, live corners O/U, next-card team), each with its own short lock. Live betting is fast **and** trustless: money moves once at buy-in; individual picks are hashes anchored by a **per-lock Merkle root** committed on-chain at each wave lock (`commit_live_root`) — no transaction per bet — and revealed at settlement (`reveal_live_pick`, membership-proven against the root).
+- **FullTime** — the keeper resolves every market via a `validate_stat` Merkle proof; winner by points takes pot − rake; ties split.
+
+**Every market — pre-match or live — settles ONLY on a provable stat (goals/corners/cards).** Context stats (shots, possession, fouls) can *trigger* a live market but never settle one; they display as context.
+
+**Fair odds / anti-drain.** A pick's odds→points value is **snapshotted from the feed at lock and frozen immutably** with the prediction on-chain (`Prediction.award_points` for pre-match; the Merkle leaf for live) — scoring reads the frozen value, never recomputes, so a later or bigger bet changes nothing. A **max-points-per-market cap** (`MAX_POINTS_PER_MARKET = 1000`, on-chain constant) clamps every snapshot, so one longshot can't dominate the pot. Scoring is deterministic: reproducible from frozen snapshots + proof-verified outcomes.
 
 **Fairness (fixes pay-to-win).** Buy-in is uniform per room; the pot is `buy_in × players`. Stake never buys points — points come only from correct, revealed predictions, scaled by each market's odds. Winner is decided purely by points; ties split equally; the floor-division dust is handed to the first winners so the pot is conserved and the rake stays exact.
 

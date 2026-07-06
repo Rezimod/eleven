@@ -23,6 +23,19 @@ export type Side = "yes" | "no";
 export const MAX_RAKE_BPS = 1_000;
 export const MIN_PLAYERS = 2;
 
+/**
+ * The on-chain room state machine: Lobby → Live → FullTime → Settled (Refunding
+ * is the void branch). Mirrors `RoomPhase` on-chain.
+ */
+export type RoomPhase = "lobby" | "live" | "fulltime" | "settled" | "refunding";
+
+/** Phase implied by the clock (terminal phases are sticky, decided by the caller). */
+export function phaseOf(kickoffTs: number, endTs: number, now: number): RoomPhase {
+  if (now >= endTs) return "fulltime";
+  if (now >= kickoffTs) return "live";
+  return "lobby";
+}
+
 // ── markets (provable predicates over TxLINE-proven stats) ───────────────────
 
 /**
@@ -99,6 +112,19 @@ export interface RoomConfig {
 export const BASE_POINTS = 50;
 export const MIN_MARKET_POINTS = 10;
 export const MAX_MARKET_POINTS = 1_000;
+
+/**
+ * ANTI-DRAIN cap — the most points one market can award a player. A pick's odds
+ * snapshot is frozen and clamped to this at lock, so a single longshot can't
+ * dominate the pot. Mirrors `MAX_POINTS_PER_MARKET` on-chain.
+ */
+export const MAX_POINTS_PER_MARKET = MAX_MARKET_POINTS;
+
+/** Freeze a pick's award: the odds-derived points, clamped to the cap. Immutable
+ *  once taken — scoring reads this, never recomputes, so stake can't change it. */
+export function freezeAward(points: number): number {
+  return Math.min(points, MAX_POINTS_PER_MARKET);
+}
 
 /**
  * Points for correctly calling an outcome with implied probability `prob`.

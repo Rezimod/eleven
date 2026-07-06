@@ -101,6 +101,41 @@ export interface GeneratedMarket {
 
 // ── templates: trigger (any stat) → provable market ───────────────────────────
 
+/** When a menu market is offered: PRE-MATCH (match-long, locks at kickoff) or a
+ *  short LIVE wave. Both settle on a provable stat — the phase only sets timing. */
+export type MarketPhase = "pre-match" | "live";
+
+/**
+ * The broad market menu. EVERY entry settles on a PROVABLE stat (goals / corners
+ * / cards) — non-provable context stats (shots, fouls, possession) are never here,
+ * they only DISPLAY. Pre-match markets are the match-long ones; live are the
+ * short-window ones the generator opens in waves.
+ */
+export interface MenuMarket {
+  id: string;
+  phase: MarketPhase;
+  title: string;
+  /** The PROVABLE stat this market settles on — always in PROVABLE_STAT_KEYS. */
+  statKey: number;
+  yesLabel: string;
+  noLabel: string;
+}
+
+export const MARKET_MENU: MenuMarket[] = [
+  // ── pre-match (match-long, lock at kickoff) ────────────────────────────────
+  { id: "match-total-goals-ou", phase: "pre-match", title: "Total goals over/under", statKey: STAT_KEY.GOALS, yesLabel: "Over", noLabel: "Under" },
+  { id: "match-total-corners-ou", phase: "pre-match", title: "Total corners over/under", statKey: STAT_KEY.CORNERS, yesLabel: "Over", noLabel: "Under" },
+  { id: "match-red-card", phase: "pre-match", title: "Red card in the match?", statKey: STAT_KEY.RED_CARDS, yesLabel: "Yes", noLabel: "No" },
+  { id: "match-btts", phase: "pre-match", title: "Both teams to score?", statKey: STAT_KEY.GOALS, yesLabel: "Yes", noLabel: "No" },
+  { id: "match-next-goal-team", phase: "pre-match", title: "Team to score the next goal", statKey: STAT_KEY.GOALS, yesLabel: "Home", noLabel: "Away" },
+  // ── live (short window, opened in waves) ───────────────────────────────────
+  { id: "live-goal-10m", phase: "live", title: "Goal in the next 10 minutes?", statKey: STAT_KEY.GOALS, yesLabel: "Goal", noLabel: "No goal" },
+  { id: "live-next-goal-team", phase: "live", title: "Who scores the next goal?", statKey: STAT_KEY.GOALS, yesLabel: "Home", noLabel: "Away" },
+  { id: "live-next-event-corner", phase: "live", title: "Is the next event a corner?", statKey: STAT_KEY.CORNERS, yesLabel: "Corner", noLabel: "Other" },
+  { id: "live-corners-ou", phase: "live", title: "Over/under total corners (live line)", statKey: STAT_KEY.CORNERS, yesLabel: "Over", noLabel: "Under" },
+  { id: "live-next-card-team", phase: "live", title: "Which team gets the next card?", statKey: STAT_KEY.RED_CARDS, yesLabel: "Home", noLabel: "Away" },
+];
+
 export interface MarketTemplate {
   id: string;
   label: string;

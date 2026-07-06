@@ -31,7 +31,7 @@ pub fn handle_join_room(ctx: Context<JoinRoom>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let room = &mut ctx.accounts.room;
 
-    require!(room.state == RoomState::Open, ElevenError::BadRoomState);
+    require!(room.phase == RoomPhase::Lobby, ElevenError::WrongPhase);
     require!(!room.settled, ElevenError::RoomAlreadySettled);
     require!(now < room.join_deadline_ts, ElevenError::JoinClosed);
     require!(room.player_count < room.max_players, ElevenError::RoomFull);

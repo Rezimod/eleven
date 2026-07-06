@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   MarketGenerator,
   DEFAULT_TEMPLATES,
+  MARKET_MENU,
   PROVABLE_STAT_KEYS,
   STAT_KEY,
   isProvableStat,
@@ -120,6 +121,22 @@ test("a template that tries to settle on a non-provable stat is rejected", () =>
   // And the running generator surfaces the throw rather than opening it.
   const g = new MarketGenerator(cfg, emptyStats());
   assert.throws(() => g.update(emptyStats(), 0), /non-provable stat/);
+});
+
+// ── the broad market menu: pre-match + live, ALL provable ─────────────────────
+
+test("every menu market settles on a provable stat — none on shots/fouls/possession", () => {
+  const NON_PROVABLE = { shots: 20, foulsMade: 21, possession: 22, shotsOnTarget: 23 };
+  assert.ok(MARKET_MENU.length >= 8, "a broad menu");
+  assert.ok(MARKET_MENU.some((m) => m.phase === "pre-match"), "has pre-match markets");
+  assert.ok(MARKET_MENU.some((m) => m.phase === "live"), "has live markets");
+  for (const m of MARKET_MENU) {
+    assert.ok(isProvableStat(m.statKey), `menu "${m.id}" settles on a provable stat`);
+    assert.ok(PROVABLE_STAT_KEYS.has(m.statKey));
+    for (const nonProvable of Object.values(NON_PROVABLE)) {
+      assert.notEqual(m.statKey, nonProvable, `menu "${m.id}" never settles on a non-provable stat`);
+    }
+  }
 });
 
 // ── no duplicates / cooldown ──────────────────────────────────────────────────

@@ -25,7 +25,7 @@ pub struct SettleRoom<'info> {
 pub fn handle_settle_room<'info>(ctx: Context<'info, SettleRoom<'info>>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
 
-    let (room_key, pot, rake_bps, player_count, market_count, resolved_count, state, settled) = {
+    let (room_key, pot, rake_bps, player_count, market_count, resolved_count, phase, settled) = {
         let r = &ctx.accounts.room;
         (
             r.key(),
@@ -34,13 +34,17 @@ pub fn handle_settle_room<'info>(ctx: Context<'info, SettleRoom<'info>>) -> Resu
             r.player_count,
             r.markets.len() as u16,
             r.resolved_market_count,
-            r.state,
+            r.phase,
             r.settled,
         )
     };
 
     require!(!settled, ElevenError::RoomAlreadySettled);
-    require!(state == RoomState::Open, ElevenError::BadRoomState);
+    require!(
+        phase != RoomPhase::Settled && phase != RoomPhase::Refunding,
+        ElevenError::WrongPhase,
+    );
+    // Full time gates settlement — the room is in FullTime by the clock here.
     require!(now >= ctx.accounts.room.end_ts, ElevenError::EndNotReached);
     // No settlement until every market has been resolved (each yes needs a proof).
     require!(resolved_count == market_count, ElevenError::MarketsUnresolved);
@@ -127,7 +131,7 @@ pub fn handle_settle_room<'info>(ctx: Context<'info, SettleRoom<'info>>) -> Resu
 
     let room = &mut ctx.accounts.room;
     room.settled = true;
-    room.state = RoomState::Settled;
+    room.phase = RoomPhase::Settled;
     room.pot_lamports = 0;
 
     msg!(
