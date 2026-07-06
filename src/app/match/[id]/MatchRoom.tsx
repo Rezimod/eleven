@@ -16,12 +16,21 @@ import { EventTicker } from "@/components/room/EventTicker";
 
 const RAKE_BPS = 500; // 5%, capped at 10% on-chain
 
+function MetaStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="flex flex-col">
+      <span className="eyebrow text-[9px] text-faint">{label}</span>
+      <span className={`num text-sm leading-none ${accent ? "text-lime" : "text-text"}`}>{value}</span>
+    </div>
+  );
+}
+
 export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string }) {
   const buyIn = (TIERS.find((t) => t.key === tier) ?? TIERS[0]).buyIn;
   const room = useRoom(fixtureId, `${fixtureId}-${tier}`, buyIn, RAKE_BPS);
   const liveMarkets = useLiveMarkets(fixtureId, room.isReplay);
 
-  // Local tick so the commit + live-bet countdowns update without feed events.
+  // Local tick so the per-row lock countdowns update without feed events.
   const [, setTick] = useState(0);
   useEffect(() => {
     if (room.phase === "ended") return;
@@ -30,90 +39,88 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
   }, [room.phase]);
 
   const { home, away, homeShort, awayShort, competition } = room.match;
-  const secsToLock = Math.max(0, Math.ceil((room.lockAt - Date.now()) / 1000));
-  // The room state machine: Lobby (pre-match) → Live → FullTime.
+  // Room state machine: Lobby (pre-match) → Live → FullTime.
   const gamePhase = room.phase === "ended" ? "fulltime" : room.phase === "commit" ? "lobby" : "live";
+  const free = buyIn === 0;
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-4 px-4 pb-16 pt-5">
-      <header className="flex items-center justify-between">
-        <Link href="/">
-          <Wordmark className="text-xl" />
-        </Link>
-        <div className="flex items-center gap-2">
-          {competition && <span className="hidden text-xs text-faint sm:inline">{competition}</span>}
-          {room.isReplay && <span className="pill text-[10px] text-faint">REPLAY</span>}
-          {room.clock.running && <LivePill minute={room.clock.minute} />}
-        </div>
-      </header>
-
-      <ScoreHeader
-        home={home}
-        away={away}
-        homeShort={homeShort}
-        awayShort={awayShort}
-        competition={competition}
-        score={room.score}
-        clock={room.clock}
-      />
-
-      {/* Room state machine: Lobby → Live → FullTime */}
-      <div className="flex items-center gap-1.5 text-[11px]">
-        {(["lobby", "live", "fulltime"] as const).map((p, i) => {
-          const active = p === gamePhase;
-          const label = p === "lobby" ? "LOBBY" : p === "live" ? "LIVE" : "FULL TIME";
-          return (
-            <div key={p} className="flex items-center gap-1.5">
-              {i > 0 && <span className="text-faint">→</span>}
-              <span className={`pill ${active ? "pill-lime" : "text-faint"}`}>{label}</span>
-            </div>
-          );
-        })}
-        <span className="ml-auto text-faint">
-          {gamePhase === "lobby" ? "pre-match bets" : gamePhase === "live" ? "live waves" : "settling"}
-        </span>
-      </div>
-
-      {/* Room meta */}
-      <div className="card flex items-center justify-between p-4 text-sm">
-        <div>
-          <div className="eyebrow text-muted">Buy-in</div>
-          <div className="num text-lg text-text">
-            {buyIn === 0 ? "FREE" : `${(buyIn / 1e9).toFixed(2)} ◎`}
+    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-4 pb-16">
+      {/* ── sticky compact header: score + clock + phase ─────────────────── */}
+      <div
+        className="sticky top-0 z-20 -mx-4 mb-3 border-b border-line px-4 pb-3 pt-4"
+        style={{ background: "rgba(10,13,18,0.82)", backdropFilter: "blur(12px)" }}
+      >
+        <header className="mb-2.5 flex items-center justify-between">
+          <Link href="/">
+            <Wordmark className="text-lg" />
+          </Link>
+          <div className="flex items-center gap-2">
+            {competition && <span className="hidden text-[11px] text-faint sm:inline">{competition}</span>}
+            {room.isReplay && <span className="pill px-2 py-0.5 text-[10px] text-faint">REPLAY</span>}
+            {room.clock.running && <LivePill minute={room.clock.minute} />}
           </div>
-        </div>
-        <div className="text-center">
-          <div className="eyebrow text-muted">Players</div>
-          <div className="num text-lg text-text">{room.players}</div>
-        </div>
-        <div className="text-center">
-          <div className="eyebrow text-muted">Pot</div>
-          <div className="num text-lg text-lime">{buyIn === 0 ? "—" : `${(room.pot / 1e9).toFixed(2)} ◎`}</div>
-        </div>
-        <div className="text-right">
-          <div className="eyebrow text-muted">Your score</div>
-          <div className="num text-lg text-lime">{room.yourPoints}</div>
+        </header>
+
+        <ScoreHeader
+          home={home}
+          away={away}
+          homeShort={homeShort}
+          awayShort={awayShort}
+          competition={competition}
+          score={room.score}
+          clock={room.clock}
+        />
+
+        {/* phase strip */}
+        <div className="mt-2.5 flex items-center gap-1.5 text-[10px]">
+          {(["lobby", "live", "fulltime"] as const).map((p, i) => {
+            const active = p === gamePhase;
+            const label = p === "lobby" ? "LOBBY" : p === "live" ? "LIVE" : "FULL TIME";
+            return (
+              <div key={p} className="flex items-center gap-1.5">
+                {i > 0 && <span className="text-faint">→</span>}
+                <span className={`pill px-2 py-0.5 ${active ? "pill-lime" : "text-faint"}`}>{label}</span>
+              </div>
+            );
+          })}
+          <span className="ml-auto text-faint">
+            {gamePhase === "lobby" ? "pre-match bets" : gamePhase === "live" ? "live waves" : "settling"}
+          </span>
         </div>
       </div>
 
-      {room.phase === "commit" && (
-        <div className="pill w-full justify-center py-2 text-sm text-muted">
-          Predictions lock in <span className="num text-lime">{secsToLock}s</span> · rake {RAKE_BPS / 100}% (max 10%)
+      <div className="flex flex-col gap-3">
+        {/* slim standings strip (pot lives here) */}
+        <Standings standings={room.standings} pot={room.pot} />
+
+        {/* slim meta line */}
+        <div className="card flex items-center justify-between gap-2 px-3 py-2">
+          <MetaStat label="Buy-in" value={free ? "FREE" : `${(buyIn / 1e9).toFixed(2)} ◎`} />
+          <div className="h-6 w-px bg-line" />
+          <MetaStat label="Players" value={String(room.players)} />
+          <div className="h-6 w-px bg-line" />
+          <MetaStat label="Your score" value={String(room.yourPoints)} accent />
+          <div className="h-6 w-px bg-line" />
+          <MetaStat label="Rake" value={`${RAKE_BPS / 100}%`} />
         </div>
-      )}
 
-      {room.phase === "ended" && (
-        <WinnerBanner winners={room.winners} payouts={room.payouts} buyIn={buyIn} rake={room.rake} />
-      )}
+        {room.phase === "ended" && (
+          <WinnerBanner winners={room.winners} payouts={room.payouts} buyIn={buyIn} rake={room.rake} />
+        )}
 
-      {room.phase !== "ended" && <StatsBar home={homeShort || home} away={awayShort || away} stats={liveMarkets.stats} />}
+        {/* pre-match markets — compact rows (resolved rows keep their receipts) */}
+        {room.ready && (
+          <PredictionSlip markets={room.markets} phase={room.phase} lockAt={room.lockAt} onPredict={room.predict} />
+        )}
 
-      {room.phase !== "ended" && <LiveBets markets={liveMarkets.live} />}
+        {/* live-wave markets — compact rows sliding in */}
+        {room.phase !== "ended" && <LiveBets markets={liveMarkets.live} />}
 
-      {room.ready && <PredictionSlip markets={room.markets} phase={room.phase} onPredict={room.predict} />}
+        {/* context stats — display only, below the actionable markets */}
+        {room.phase !== "ended" && <StatsBar home={homeShort || home} away={awayShort || away} stats={liveMarkets.stats} />}
 
-      <Standings standings={room.standings} pot={room.pot} />
-      <EventTicker events={room.events} />
+        <EventTicker events={room.events} />
+      </div>
     </main>
   );
 }
