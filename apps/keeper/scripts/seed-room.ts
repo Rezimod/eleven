@@ -95,8 +95,9 @@ async function main() {
     yesPoints,
     noPoints,
   });
-  // idx0 corners>4 (ProveYes), idx1 red card (ProveYes), idx2 away goals>5 (TimeoutNo)
-  const markets = [market(6, 4, 100, 100), market(8, 0, 200, 60), market(1, 5, 100, 100)];
+  // All three cross TRUE in the sim → every market resolves via the validate_stat
+  // ProveYes CPI (no timeout): corners>4 (6 corners), red card (1 red), home goals>2 (3).
+  const markets = [market(6, 4, 100, 100), market(8, 0, 200, 60), market(1, 2, 100, 100)];
 
   // ── create_room (A = creator + player #1) ──────────────────────────────────
   const createSig = await program.methods
@@ -126,10 +127,10 @@ async function main() {
     .rpc();
   log("join_room (B)", joinSig);
 
-  // ── commit + reveal (A sweeps: YES,YES,NO; B misses: NO,NO,YES) ────────────
+  // ── commit + reveal (A sweeps all YES; B misses all) ───────────────────────
   const picks: { player: InstanceType<typeof Keypair>; sides: number[] }[] = [
-    { player: A, sides: [1, 1, 0] },
-    { player: B, sides: [0, 0, 1] },
+    { player: A, sides: [1, 1, 1] },
+    { player: B, sides: [0, 0, 0] },
   ];
   const sigs: Record<string, string> = { create_room: createSig, join_room: joinSig };
   for (const { player, sides } of picks) {
@@ -192,7 +193,7 @@ async function main() {
         markets: [
           { index: 0, kind: "cornersOver", statKey: 6, threshold: 4, comparison: "GreaterThan", label: "Total corners over 4" },
           { index: 1, kind: "redCard", statKey: 8, threshold: 0, comparison: "GreaterThan", label: "A red card is shown" },
-          { index: 2, kind: "awayGoalsOver", statKey: 1, threshold: 5, comparison: "GreaterThan", label: "Away goals over 5" },
+          { index: 2, kind: "homeGoalsOver", statKey: 1, threshold: 2, comparison: "GreaterThan", label: "Home goals over 2" },
         ],
       },
     ],
