@@ -157,14 +157,115 @@ export interface MarketTemplate {
 
 // ── the generator ─────────────────────────────────────────────────────────────
 
+/**
+ * A rolling-baseline template. Unlike a `MarketTemplate`, it has NO trigger — the
+ * generator opens these on a steady cadence so the LIVE phase ALWAYS has bettable
+ * markets, even when live-stat triggers never fire (missing stat keys, quiet feed).
+ * Its predicate must still settle on a PROVABLE stat — enforced in `buildBaseline`.
+ */
+export interface BaselineTemplate {
+  id: string;
+  predicate(now: FixtureStats): Predicate;
+}
+
+export interface BaselineConfig {
+  templates: BaselineTemplate[];
+  /** Always keep at least this many markets open for commit during live play. */
+  target: number;
+  /** How long each baseline market stays bettable (open → lock), in seconds. */
+  lockSec: number;
+  /** How long until a baseline market resolves `no` if its stat never crosses. */
+  windowSec: number;
+}
+
 export interface GeneratorConfig {
   fixtureId: number;
   /** Commit-reveal window (seconds) after open before the market locks. */
   commitWindowSec: number;
   templates: MarketTemplate[];
+  /** Optional always-on rolling baseline so live play is never un-bettable. */
+  baseline?: BaselineConfig;
 }
 
 export const DEFAULT_COMMIT_WINDOW_SEC = 20;
+
+// ── rolling baseline defaults (the "always something to bet" guarantee) ────────
+
+/** Keep this many markets open for commit at all times during live play. */
+export const DEFAULT_BASELINE_TARGET = 3;
+/** Each baseline market is bettable for ~this long before it locks (~60–120s). */
+export const DEFAULT_BASELINE_LOCK_SEC = 80;
+/** A baseline market resolves `no` by here if its provable stat never crosses. */
+export const DEFAULT_BASELINE_WINDOW_SEC = 220;
+
+/**
+ * The rolling baseline menu — all PROVABLE, all MONOTONE (settle `yes` the instant
+ * the stat crosses the frozen threshold, else `no` at the deadline), so they resolve
+ * with zero change to the settlement path. Thresholds snapshot the live stat at open
+ * so each fresh market stays relevant as the score/corners move.
+ */
+export const DEFAULT_BASELINE_TEMPLATES: BaselineTemplate[] = [
+  {
+    id: "base-goal",
+    predicate: (now) => ({
+      statKey: STAT_KEY.GOALS,
+      threshold: now.goals, // yes iff any goal before it resolves
+      comparison: "GreaterThan",
+      yesProb: 0.4,
+      title: "A goal in the next few minutes?",
+      yesLabel: "Goal",
+      noLabel: "No goal",
+    }),
+  },
+  {
+    id: "base-corner",
+    predicate: (now) => ({
+      statKey: STAT_KEY.CORNERS,
+      threshold: now.corners, // yes iff any corner before it resolves
+      comparison: "GreaterThan",
+      yesProb: 0.62,
+      title: "A corner in the next few minutes?",
+      yesLabel: "Corner",
+      noLabel: "No corner",
+    }),
+  },
+  {
+    id: "base-corners-ou",
+    predicate: (now) => ({
+      statKey: STAT_KEY.CORNERS,
+      threshold: now.corners + 2, // yes iff at least 2 more corners
+      comparison: "GreaterThan",
+      yesProb: 0.5,
+      title: `Over ${now.corners + 2} total corners?`,
+      yesLabel: "Over",
+      noLabel: "Under",
+    }),
+  },
+  {
+    id: "base-goals-ou",
+    predicate: (now) => ({
+      statKey: STAT_KEY.GOALS,
+      threshold: now.goals + 1, // yes iff at least 2 more goals
+      comparison: "GreaterThan",
+      yesProb: 0.33,
+      title: `Over ${now.goals + 1} total goals?`,
+      yesLabel: "Over",
+      noLabel: "Under",
+    }),
+  },
+  {
+    id: "base-card",
+    predicate: (now) => ({
+      statKey: STAT_KEY.RED_CARDS,
+      threshold: now.redCards, // yes iff another red card
+      comparison: "GreaterThan",
+      yesProb: 0.18,
+      title: "A red card in the next few minutes?",
+      yesLabel: "Card",
+      noLabel: "No card",
+    }),
+  },
+];
 
 export type GenEventType = "open" | "lock" | "expire";
 
@@ -179,6 +280,25 @@ interface Tracked {
   market: GeneratedMarket;
   locked: boolean;
   expired: boolean;
+}
+
+/**
+ * Has a market's monotone provable predicate already crossed `yes`? Every market
+ * this generator emits settles on `stat > threshold`, so once the live stat passes
+ * the frozen threshold the market is decided and no longer bettable — even before
+ * its lock. The generator retires it so the rolling baseline tops the open set back
+ * up (settlement itself still happens in the room; this only keeps generation honest).
+ */
+function predicateCrossed(stats: FixtureStats, spec: MarketSpec): boolean {
+  const value =
+    spec.statKey === STAT_KEY.GOALS
+      ? stats.goals
+      : spec.statKey === STAT_KEY.CORNERS
+        ? stats.corners
+        : spec.statKey === STAT_KEY.RED_CARDS
+          ? stats.redCards
+          : 0;
+  return value > spec.threshold;
 }
 
 /**
@@ -236,6 +356,8 @@ export class MarketGenerator {
   private prev: FixtureStats;
   private readonly lastFired = new Map<string, number>();
   private readonly tracked: Tracked[] = [];
+  private baselineIdx = 0; // round-robin cursor over the baseline menu
+  private seq = 0; // disambiguates baseline ids opened at the same second
 
   constructor(cfg: GeneratorConfig, initial: FixtureStats = emptyStats()) {
     this.cfg = cfg;
@@ -250,13 +372,14 @@ export class MarketGenerator {
   update(stats: FixtureStats, nowSec: number): GenEvent[] {
     const events: GenEvent[] = [];
 
-    // 1) Age existing markets: lock at lockTs, expire at resolveDeadlineTs.
+    // 1) Age existing markets: lock at lockTs; expire at the resolve deadline OR
+    //    the moment the stat crosses (the market is decided → no longer bettable).
     for (const t of this.tracked) {
       if (!t.locked && nowSec >= t.market.spec.lockTs) {
         t.locked = true;
         events.push({ type: "lock", market: t.market, atSec: nowSec });
       }
-      if (!t.expired && nowSec >= t.market.spec.resolveDeadlineTs) {
+      if (!t.expired && (nowSec >= t.market.spec.resolveDeadlineTs || predicateCrossed(stats, t.market.spec))) {
         t.expired = true;
         events.push({ type: "expire", market: t.market, atSec: nowSec });
       }
@@ -275,8 +398,90 @@ export class MarketGenerator {
       events.push({ type: "open", market, atSec: nowSec });
     }
 
+    // 3) Top the open set back up to the baseline target — this is the guarantee
+    //    that live play is NEVER un-bettable, independent of whether triggers fired.
+    if (this.cfg.baseline) this.topUpBaseline(stats, nowSec, events);
+
     this.prev = stats;
     return events;
+  }
+
+  /**
+   * Ensure at least `target` markets are open for commit by opening rolling
+   * baseline markets from the menu (round-robin, one open instance per type).
+   * Runs every tick, so the instant a market locks or resolves the next opens —
+   * a joiner mid-match always lands on open markets.
+   */
+  private topUpBaseline(stats: FixtureStats, nowSec: number, events: GenEvent[]): void {
+    const b = this.cfg.baseline!;
+    let open = this.openForCommit().length;
+    // Stagger the lock times across a burst so they roll off one at a time rather
+    // than all locking together and briefly dipping the open count.
+    const step = Math.max(1, Math.floor(b.lockSec / Math.max(1, b.target)));
+    let burst = 0;
+    // Scan each menu entry at most once per tick (guard against all-duplicates).
+    for (let scanned = 0; open < b.target && scanned < b.templates.length; scanned++) {
+      const tmpl = b.templates[this.baselineIdx % b.templates.length];
+      this.baselineIdx++;
+      if (this.hasOpenBaseline(tmpl.id)) continue; // one OPEN instance per type
+      const stagger = burst * step;
+      const market = this.buildBaseline(tmpl, stats, nowSec, b.lockSec + stagger, b.windowSec + stagger);
+      this.tracked.push({ market, locked: false, expired: false });
+      events.push({ type: "open", market, atSec: nowSec });
+      open++;
+      burst++;
+    }
+  }
+
+  /** Assemble a baseline `MarketSpec`, ENFORCING provability like `buildMarket`. */
+  private buildBaseline(
+    tmpl: BaselineTemplate,
+    stats: FixtureStats,
+    nowSec: number,
+    lockSec: number,
+    windowSec: number,
+  ): GeneratedMarket {
+    const p = tmpl.predicate(stats);
+    if (!isProvableStat(p.statKey)) {
+      throw new Error(
+        `baseline "${tmpl.id}" tried to settle on non-provable stat ${p.statKey} — ` +
+          `markets may only resolve on goals/corners/cards`,
+      );
+    }
+    const lockTs = nowSec + lockSec;
+    const resolveDeadlineTs = nowSec + windowSec;
+    if (!(lockTs < resolveDeadlineTs)) {
+      throw new Error(`baseline "${tmpl.id}": commit window must close before the resolve deadline`);
+    }
+    const { yesPoints, noPoints } = marketPoints(p.yesProb);
+    const spec: MarketSpec = {
+      id: `${this.cfg.fixtureId}-${tmpl.id}-${nowSec}-${this.seq++}`,
+      label: p.title,
+      statKey: p.statKey,
+      period: 0,
+      threshold: p.threshold,
+      comparison: p.comparison,
+      lockTs,
+      resolveDeadlineTs,
+      yesPoints,
+      noPoints,
+    };
+    return {
+      spec,
+      templateId: tmpl.id,
+      title: p.title,
+      yesLabel: p.yesLabel,
+      noLabel: p.noLabel,
+      triggerReason: "rolling live market — always open",
+      statKey: p.statKey,
+      openedAtSec: nowSec,
+      openedAtMinute: stats.minute,
+    };
+  }
+
+  /** A baseline type has an OPEN (bettable) instance right now. */
+  private hasOpenBaseline(templateId: string): boolean {
+    return this.tracked.some((t) => t.market.templateId === templateId && !t.locked && !t.expired);
   }
 
   /** A template has a "live" instance if it's opened and not yet expired. */

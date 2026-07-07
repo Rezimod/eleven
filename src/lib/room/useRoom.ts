@@ -15,6 +15,10 @@ import {
   MarketGenerator,
   DEFAULT_TEMPLATES,
   DEFAULT_COMMIT_WINDOW_SEC,
+  DEFAULT_BASELINE_TEMPLATES,
+  DEFAULT_BASELINE_TARGET,
+  DEFAULT_BASELINE_LOCK_SEC,
+  DEFAULT_BASELINE_WINDOW_SEC,
   emptyStats,
   STAT_KEY,
   type FixtureStats,
@@ -376,7 +380,18 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
     let alive = true;
     let unsub = () => {};
     const gen = new MarketGenerator(
-      { fixtureId, commitWindowSec: DEFAULT_COMMIT_WINDOW_SEC, templates: DEFAULT_TEMPLATES },
+      {
+        fixtureId,
+        commitWindowSec: DEFAULT_COMMIT_WINDOW_SEC,
+        templates: DEFAULT_TEMPLATES,
+        // Always-on rolling baseline: live play is never left with zero open markets.
+        baseline: {
+          templates: DEFAULT_BASELINE_TEMPLATES,
+          target: DEFAULT_BASELINE_TARGET,
+          lockSec: DEFAULT_BASELINE_LOCK_SEC,
+          windowSec: DEFAULT_BASELINE_WINDOW_SEC,
+        },
+      },
       emptyStats(),
     );
     let stats = emptyStats();
@@ -441,7 +456,12 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
       };
     });
 
-    const liveMarkets: LiveMarketView[] = state.liveDefs.map((gm) => {
+    // Show every still-open live market, plus only the few most-recent resolved
+    // ones — the rolling baseline would otherwise pile up hundreds over a match.
+    const RESOLVED_LIVE_SHOWN = 4;
+    const openLive = state.liveDefs.filter((gm) => !room?.marketState[gm.spec.id]?.resolved);
+    const resolvedLive = state.liveDefs.filter((gm) => room?.marketState[gm.spec.id]?.resolved).slice(-RESOLVED_LIVE_SHOWN);
+    const liveMarkets: LiveMarketView[] = [...openLive, ...resolvedLive].map((gm) => {
       const st = room?.marketState[gm.spec.id];
       return {
         id: gm.spec.id,
