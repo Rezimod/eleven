@@ -62,6 +62,8 @@ function fixtureToSummary(f: RawFixture): MatchSummary {
     status,
     score: { home: 0, away: 0 },
     minute: 0,
+    // The REAL kickoff — pre-match markets derive their lock (kickoff − 60s) from it.
+    kickoffTs: start,
     kickoffLabel: status === "live" ? "LIVE" : kickoffLabel(f.StartTime),
   };
 }

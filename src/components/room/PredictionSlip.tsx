@@ -24,7 +24,7 @@ export function PredictionSlip({
       <div className="flex items-center justify-between">
         <h3 className="eyebrow text-lime">Pre-match</h3>
         <span className="text-[11px] text-muted">
-          {canPredict ? "one tap to pick · locks at kickoff" : phase === "live" ? "locked · resolving live" : "full time"}
+          {canPredict ? "one tap to pick · locks 60s before kickoff" : phase === "live" ? "locked · resolving live" : "full time"}
         </span>
       </div>
 

@@ -32,7 +32,9 @@ import { mockSettleArgs, settleArgsToReceiptProof, type ReceiptProof } from "@/l
 import { BOTS, botPick, isBot } from "./bots";
 
 const YOU = "You";
-const LOCK_WINDOW_MS = 12_000; // commit window before pre-match predictions lock
+// Pre-match markets lock this many seconds BEFORE the real kickoff — never a fixed
+// countdown from when the user entered the room. Sitting in the lobby never locks them.
+const PRE_MATCH_LOCK_LEAD_SEC = 60;
 const CORNERS_LINE = 6;
 
 /** How a pre-match market maps onto the live feed for resolution (UI-only metadata). */
@@ -144,7 +146,7 @@ interface State {
 }
 
 type Action =
-  | { type: "INIT"; home: string; away: string; homeShort: string; awayShort: string; competition: string; status: "live" | "upcoming" | "final"; now: number; buyIn: number; rakeBps: number }
+  | { type: "INIT"; home: string; away: string; homeShort: string; awayShort: string; competition: string; status: "live" | "upcoming" | "final"; now: number; kickoffTs: number; buyIn: number; rakeBps: number }
   | { type: "PREDICT"; marketId: string; side: Side; now: number }
   | { type: "LOCK_BOTS"; now: number }
   | { type: "EVENT"; e: MatchEvent; stats: FixtureStats; opened: GeneratedMarket[]; nowSec: number };
@@ -229,8 +231,12 @@ function resolveLive(room: Room, liveDefs: GeneratedMarket[], stats: FixtureStat
 function reducer(state: State, a: Action): State {
   switch (a.type) {
     case "INIT": {
-      const lockTs = Math.floor((a.now + LOCK_WINDOW_MS) / 1000);
-      const endTs = lockTs + 60 * 60;
+      const kickoffSec = Math.floor(a.kickoffTs / 1000);
+      // Pre-match markets lock 60s BEFORE the real kickoff, derived from the fixture's
+      // kickoff time — so they stay open however long the user waits pre-kickoff, and
+      // a joiner arriving after kickoff finds them already locked (live markets take over).
+      const lockTs = kickoffSec - PRE_MATCH_LOCK_LEAD_SEC;
+      const endTs = kickoffSec + 60 * 60;
       const defs = buildMarkets(state.fixtureId, a.home, a.away, lockTs, endTs);
       let room = createRoom({
         id: state.roomId,
@@ -244,8 +250,10 @@ function reducer(state: State, a: Action): State {
         refundDeadline: endTs + 3600,
         markets: defs.map((d) => d.spec),
       });
-      // Two free-play bot opponents join the room (points only, no escrow).
-      for (const b of BOTS) room = joinRoom(room, b, Math.floor(a.now / 1000));
+      // Two free-play bot opponents join the room (points only, no escrow). Seed them
+      // just inside the join window so it works even when kickoff is already past.
+      const joinAt = lockTs - 1;
+      for (const b of BOTS) room = joinRoom(room, b, joinAt);
       return { ...state, home: a.home, away: a.away, homeShort: a.homeShort, awayShort: a.awayShort, competition: a.competition, status: a.status, lockTs, defs, room, ready: true };
     }
     case "PREDICT": {
@@ -398,7 +406,7 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
 
     feed.getMatch(fixtureId).then((m) => {
       if (!alive || !m) return;
-      dispatch({ type: "INIT", home: m.home, away: m.away, homeShort: m.homeShort, awayShort: m.awayShort, competition: m.competition, status: m.status, now: Date.now(), buyIn, rakeBps });
+      dispatch({ type: "INIT", home: m.home, away: m.away, homeShort: m.homeShort, awayShort: m.awayShort, competition: m.competition, status: m.status, now: Date.now(), kickoffTs: m.kickoffTs, buyIn, rakeBps });
       // A finished fixture replays from kickoff (REPLAY); a live one tails live.
       unsub = feed.subscribe(
         fixtureId,

@@ -39,13 +39,20 @@ function haptic() {
   }
 }
 
+/** Compact real countdown — `Ns`, `Nm Ss`, or `Nh Nm` so a lock hours out stays legible. */
+function fmtCountdown(secs: number): string {
+  if (secs >= 3600) return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+  if (secs >= 60) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+  return `${secs}s`;
+}
+
 function LockChip({ secs }: { secs: number }) {
   const urgent = secs <= 5;
   return (
     <span className={`pill shrink-0 px-2 py-0.5 text-[10px] ${urgent ? "pill-live" : "text-faint"}`}>
       {secs > 0 ? (
         <>
-          locks <span className="num">{secs}s</span>
+          locks <span className="num">{fmtCountdown(secs)}</span>
         </>
       ) : (
         "locked"
