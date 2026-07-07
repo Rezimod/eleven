@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useReducer } from "react";
 
 import {
+  addMarket,
   createRoom,
   joinRoom,
   predict as corePredict,
@@ -11,19 +12,26 @@ import {
   standings as coreStandings,
   playerPoints,
   marketPoints,
+  MarketGenerator,
+  DEFAULT_TEMPLATES,
+  DEFAULT_COMMIT_WINDOW_SEC,
+  emptyStats,
+  STAT_KEY,
+  type FixtureStats,
+  type GeneratedMarket,
   type Room,
   type MarketSpec,
   type Side,
 } from "@/lib/eleven";
 import { feedMode, getFeed, type MatchClock, type MatchEvent, type Score } from "@/lib/feed";
 import { mockSettleArgs, settleArgsToReceiptProof, type ReceiptProof } from "@/lib/txline";
-import { BOTS, botSide } from "./bots";
+import { BOTS, botPick, isBot } from "./bots";
 
 const YOU = "You";
-const LOCK_WINDOW_MS = 12_000; // commit window before predictions lock
+const LOCK_WINDOW_MS = 12_000; // commit window before pre-match predictions lock
 const CORNERS_LINE = 6;
 
-/** How a market maps onto the live feed for resolution (UI-only metadata). */
+/** How a pre-match market maps onto the live feed for resolution (UI-only metadata). */
 type Resolver =
   | { kind: "nextGoalHome" }
   | { kind: "cornersOver"; line: number }
@@ -75,6 +83,40 @@ function buildMarkets(fixtureId: number, home: string, away: string, lockTs: num
   ];
 }
 
+/** Provable-stat value from the rolling fixture stats — the axis a live market settles on. */
+function statValue(stats: FixtureStats, statKey: number): number {
+  switch (statKey) {
+    case STAT_KEY.GOALS:
+      return stats.goals;
+    case STAT_KEY.CORNERS:
+      return stats.corners;
+    case STAT_KEY.RED_CARDS:
+      return stats.redCards;
+    default:
+      return 0;
+  }
+}
+
+/** Fold one feed event into the rolling stats the generator + resolution read. */
+function foldStats(prev: FixtureStats, e: MatchEvent): FixtureStats {
+  const scored = e.kind === "goal" || e.kind === "clock" || e.kind === "kickoff";
+  return {
+    ...prev,
+    minute: e.minute,
+    homeGoals: scored ? e.score.home : prev.homeGoals,
+    awayGoals: scored ? e.score.away : prev.awayGoals,
+    goals: e.score.home + e.score.away,
+    corners: prev.corners + (e.kind === "corner" ? 1 : 0),
+    redCards: prev.redCards + (e.kind === "card" && e.card === "red" ? 1 : 0),
+    shots: e.stats?.shots ?? prev.shots,
+    shotsOnTarget: e.stats?.shotsOnTarget ?? prev.shotsOnTarget,
+    possessionHome: e.stats?.possessionHome ?? prev.possessionHome,
+    attacks: e.stats?.attacks ?? prev.attacks,
+    dangerousAttacks: e.stats?.dangerousAttacks ?? prev.dangerousAttacks,
+    momentum: e.stats?.momentum ?? prev.momentum,
+  };
+}
+
 interface State {
   fixtureId: number;
   roomId: string;
@@ -89,9 +131,9 @@ interface State {
   events: MatchEvent[];
   lockTs: number; // seconds
   defs: MarketDef[];
+  liveDefs: GeneratedMarket[]; // live-wave markets added to the room as play unfolds
+  stats: FixtureStats;
   room: Room | null;
-  corners: number;
-  redSeen: boolean;
   yourPicks: Record<string, Side>;
   ended: boolean;
   ready: boolean;
@@ -101,7 +143,7 @@ type Action =
   | { type: "INIT"; home: string; away: string; homeShort: string; awayShort: string; competition: string; status: "live" | "upcoming" | "final"; now: number; buyIn: number; rakeBps: number }
   | { type: "PREDICT"; marketId: string; side: Side; now: number }
   | { type: "LOCK_BOTS"; now: number }
-  | { type: "EVENT"; e: MatchEvent };
+  | { type: "EVENT"; e: MatchEvent; stats: FixtureStats; opened: GeneratedMarket[]; nowSec: number };
 
 function initial(fixtureId: number, roomId: string): State {
   return {
@@ -118,17 +160,30 @@ function initial(fixtureId: number, roomId: string): State {
     events: [],
     lockTs: 0,
     defs: [],
+    liveDefs: [],
+    stats: emptyStats(),
     room: null,
-    corners: 0,
-    redSeen: false,
     yourPicks: {},
     ended: false,
     ready: false,
   };
 }
 
-/** Resolve a market from the current feed-derived aggregates. */
-function resolveOne(room: Room, def: MarketDef, s: State, goalTeam?: "home" | "away"): Room {
+/** Bots place their (odds-weighted) pick on a market that's open for commit. */
+function botsPick(room: Room, roomId: string, spec: MarketSpec, nowSec: number): Room {
+  let r = room;
+  for (const b of BOTS) {
+    try {
+      r = corePredict(r, b, spec.id, botPick(roomId, spec.id, b, spec.yesPoints, spec.noPoints), nowSec);
+    } catch {
+      /* already picked / locked — skip */
+    }
+  }
+  return r;
+}
+
+/** Resolve a pre-match market from the current feed-derived stats. */
+function resolvePreMatch(room: Room, def: MarketDef, s: State, goalTeam?: "home" | "away"): Room {
   if (room.marketState[def.spec.id]?.resolved) return room;
   let outcome: boolean;
   switch (def.resolver.kind) {
@@ -136,16 +191,35 @@ function resolveOne(room: Room, def: MarketDef, s: State, goalTeam?: "home" | "a
       outcome = goalTeam === "home";
       break;
     case "cornersOver":
-      outcome = s.corners > def.resolver.line;
+      outcome = s.stats.corners > def.resolver.line;
       break;
     case "redCard":
-      outcome = s.redSeen;
+      outcome = s.stats.redCards > 0;
       break;
     case "homeOutscore":
       outcome = s.score.home > s.score.away;
       break;
   }
   return resolveMarket(room, def.spec.id, outcome);
+}
+
+/**
+ * Resolve every open live-wave market from the rolling stats. A live market settles
+ * `yes` the instant its provable stat crosses the frozen threshold; `no` once its
+ * resolve deadline passes (or at full time) without crossing. Monotone predicates,
+ * the same shape the on-chain keeper resolves.
+ */
+function resolveLive(room: Room, liveDefs: GeneratedMarket[], stats: FixtureStats, nowSec: number, fulltime: boolean): Room {
+  let r = room;
+  for (const gm of liveDefs) {
+    if (r.marketState[gm.spec.id]?.resolved) continue;
+    if (statValue(stats, gm.spec.statKey) > gm.spec.threshold) {
+      r = resolveMarket(r, gm.spec.id, true);
+    } else if (fulltime || nowSec >= gm.spec.resolveDeadlineTs) {
+      r = resolveMarket(r, gm.spec.id, false);
+    }
+  }
+  return r;
 }
 
 function reducer(state: State, a: Action): State {
@@ -166,15 +240,20 @@ function reducer(state: State, a: Action): State {
         refundDeadline: endTs + 3600,
         markets: defs.map((d) => d.spec),
       });
-      for (const b of BOTS.slice(0, 5)) room = joinRoom(room, b, Math.floor(a.now / 1000));
+      // Two free-play bot opponents join the room (points only, no escrow).
+      for (const b of BOTS) room = joinRoom(room, b, Math.floor(a.now / 1000));
       return { ...state, home: a.home, away: a.away, homeShort: a.homeShort, awayShort: a.awayShort, competition: a.competition, status: a.status, lockTs, defs, room, ready: true };
     }
     case "PREDICT": {
-      if (!state.room || a.now / 1000 >= state.lockTs) return state;
+      if (!state.room) return state;
+      const market = state.room.markets.find((m) => m.id === a.marketId);
+      if (!market) return state;
+      const nowSec = Math.floor(a.now / 1000);
+      if (nowSec >= market.lockTs) return state; // respect this market's lock window
       if (state.yourPicks[a.marketId]) return state;
       let room: Room;
       try {
-        room = corePredict(state.room, YOU, a.marketId, a.side, Math.floor(a.now / 1000));
+        room = corePredict(state.room, YOU, a.marketId, a.side, nowSec);
       } catch {
         return state;
       }
@@ -183,37 +262,46 @@ function reducer(state: State, a: Action): State {
     case "LOCK_BOTS": {
       if (!state.room) return state;
       let room = state.room;
-      const t = Math.floor(a.now / 1000) - 1;
-      for (const d of state.defs) {
-        for (const b of BOTS.slice(0, 5)) {
-          try {
-            room = corePredict(room, b, d.spec.id, botSide(state.roomId, d.spec.id, b), t);
-          } catch {
-            /* already predicted */
-          }
-        }
-      }
+      const t = Math.floor(a.now / 1000) - 1; // land inside the pre-match lock window
+      for (const d of state.defs) room = botsPick(room, state.roomId, d.spec, t);
       return { ...state, room };
     }
     case "EVENT": {
       const e = a.e;
-      let s: State = { ...state, clock: e.clock, events: e.kind === "clock" ? state.events : [e, ...state.events].slice(0, 40) };
-      if (e.kind === "goal") s = { ...s, score: e.score };
-      if (e.kind === "corner") s = { ...s, corners: s.corners + 1 };
-      if (e.kind === "card" && e.card === "red") s = { ...s, redSeen: true };
-      if (e.kind === "clock" || e.kind === "kickoff") s = { ...s, score: e.score };
+      const fulltime = e.kind === "fulltime";
+      let s: State = {
+        ...state,
+        stats: a.stats,
+        clock: e.clock,
+        events: e.kind === "clock" ? state.events : [e, ...state.events].slice(0, 40),
+      };
+      if (e.kind === "goal" || e.kind === "clock" || e.kind === "kickoff") s = { ...s, score: e.score };
 
       if (!s.room) return s;
       let room = s.room;
 
+      // 1) Newly-opened live markets: add to the room, bots pick immediately (in-window).
+      let liveDefs = s.liveDefs;
+      if (a.opened.length) {
+        liveDefs = [...liveDefs];
+        for (const gm of a.opened) {
+          room = addMarket(room, gm.spec);
+          room = botsPick(room, s.roomId, gm.spec, a.nowSec);
+          liveDefs.push(gm);
+        }
+      }
+
+      // 2) Resolve markets from the stats this event produced.
       if (e.kind === "goal") {
         const goalDef = s.defs.find((d) => d.resolver.kind === "nextGoalHome" && !room.marketState[d.spec.id]?.resolved);
-        if (goalDef) room = resolveOne(room, goalDef, s, e.team === "home" ? "home" : "away");
+        if (goalDef) room = resolvePreMatch(room, goalDef, s, e.team === "home" ? "home" : "away");
       }
-      if (e.kind === "fulltime") {
-        for (const d of s.defs) room = resolveOne(room, d, s);
+      if (fulltime) {
+        for (const d of s.defs) room = resolvePreMatch(room, d, s);
       }
-      return { ...s, room, ended: e.kind === "fulltime" };
+      room = resolveLive(room, liveDefs, a.stats, a.nowSec, fulltime);
+
+      return { ...s, room, liveDefs, ended: fulltime };
     }
     default:
       return state;
@@ -233,6 +321,28 @@ export interface MarketView {
   receipt?: ReceiptProof;
 }
 
+export interface LiveMarketView {
+  id: string;
+  title: string;
+  yesLabel: string;
+  noLabel: string;
+  yesPoints: number;
+  noPoints: number;
+  triggerReason: string;
+  statKey: number;
+  lockTs: number; // seconds
+  yourSide: Side | null;
+  resolved: boolean;
+  outcome?: boolean;
+}
+
+export interface StandingView {
+  player: string;
+  points: number;
+  isYou: boolean;
+  isBot: boolean;
+}
+
 export interface RoomView {
   ready: boolean;
   match: { home: string; away: string; homeShort: string; awayShort: string; competition: string };
@@ -241,11 +351,13 @@ export interface RoomView {
   score: Score;
   clock: MatchClock;
   events: MatchEvent[];
+  stats: FixtureStats;
   phase: "commit" | "live" | "ended";
   lockAt: number; // ms
   markets: MarketView[];
+  liveMarkets: LiveMarketView[];
   yourPoints: number;
-  standings: { player: string; points: number; isYou: boolean }[];
+  standings: StandingView[];
   buyIn: number;
   rakeBps: number;
   players: number;
@@ -263,11 +375,26 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
     const feed = getFeed();
     let alive = true;
     let unsub = () => {};
+    const gen = new MarketGenerator(
+      { fixtureId, commitWindowSec: DEFAULT_COMMIT_WINDOW_SEC, templates: DEFAULT_TEMPLATES },
+      emptyStats(),
+    );
+    let stats = emptyStats();
+
     feed.getMatch(fixtureId).then((m) => {
       if (!alive || !m) return;
       dispatch({ type: "INIT", home: m.home, away: m.away, homeShort: m.homeShort, awayShort: m.awayShort, competition: m.competition, status: m.status, now: Date.now(), buyIn, rakeBps });
       // A finished fixture replays from kickoff (REPLAY); a live one tails live.
-      unsub = feed.subscribe(fixtureId, (e) => dispatch({ type: "EVENT", e }), { replay: m.status === "final" });
+      unsub = feed.subscribe(
+        fixtureId,
+        (e) => {
+          stats = foldStats(stats, e);
+          const nowSec = Math.floor(e.ts / 1000);
+          const opened = gen.update(stats, nowSec).filter((g) => g.type === "open").map((g) => g.market);
+          dispatch({ type: "EVENT", e, stats, opened, nowSec });
+        },
+        { replay: m.status === "final" },
+      );
     });
     return () => {
       alive = false;
@@ -275,7 +402,7 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
     };
   }, [fixtureId, buyIn, rakeBps]);
 
-  // Lock bot predictions when the commit window closes.
+  // Lock bot pre-match predictions when the commit window closes.
   useEffect(() => {
     if (!state.ready) return;
     const ms = Math.max(0, state.lockTs * 1000 - Date.now());
@@ -314,8 +441,26 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
       };
     });
 
-    const standings = room
-      ? coreStandings(room).map((s) => ({ ...s, isYou: s.player === YOU }))
+    const liveMarkets: LiveMarketView[] = state.liveDefs.map((gm) => {
+      const st = room?.marketState[gm.spec.id];
+      return {
+        id: gm.spec.id,
+        title: gm.title,
+        yesLabel: gm.yesLabel,
+        noLabel: gm.noLabel,
+        yesPoints: gm.spec.yesPoints,
+        noPoints: gm.spec.noPoints,
+        triggerReason: gm.triggerReason,
+        statKey: gm.statKey,
+        lockTs: gm.spec.lockTs,
+        yourSide: state.yourPicks[gm.spec.id] ?? null,
+        resolved: !!st?.resolved,
+        outcome: st?.outcome,
+      };
+    });
+
+    const standings: StandingView[] = room
+      ? coreStandings(room).map((s) => ({ ...s, isYou: s.player === YOU, isBot: isBot(s.player) }))
       : [];
     const result = room && state.ended ? settle(room) : null;
 
@@ -327,9 +472,11 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
       score: state.score,
       clock: state.clock,
       events: state.events,
+      stats: state.stats,
       phase,
       lockAt,
       markets,
+      liveMarkets,
       yourPoints: room ? playerPoints(room, YOU) : 0,
       standings,
       buyIn: state.room?.buyIn ?? buyIn,

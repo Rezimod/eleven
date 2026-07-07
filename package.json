@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "probe": "node scripts/txline-probe.ts",
-    "test:core": "node --test src/lib/eleven/core.test.ts"
+    "test:core": "node --test src/lib/eleven/core.test.ts src/lib/eleven/round.test.ts"
   },
   "dependencies": {
     "react": "19.1.0",

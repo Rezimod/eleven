@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRoom } from "@/lib/room/useRoom";
-import { useLiveMarkets } from "@/lib/room/useLiveMarkets";
 import { TIERS } from "@/components/RoomCard";
 import { Wordmark, LivePill } from "@/components/Brand";
 import { ScoreHeader } from "@/components/room/ScoreHeader";
@@ -15,6 +14,29 @@ import { WinnerBanner } from "@/components/room/WinnerBanner";
 import { EventTicker } from "@/components/room/EventTicker";
 
 const RAKE_BPS = 500; // 5%, capped at 10% on-chain
+
+/** Copy this room's deep link — the match room is fully addressable by its URL. */
+function ShareButton() {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (typeof window === "undefined") return;
+        navigator.clipboard?.writeText(window.location.href).then(
+          () => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          },
+          () => {},
+        );
+      }}
+      className="pill px-2 py-0.5 text-[10px] text-faint hover:text-text"
+    >
+      {copied ? "copied ✓" : "share"}
+    </button>
+  );
+}
 
 function MetaStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
@@ -28,7 +50,6 @@ function MetaStat({ label, value, accent }: { label: string; value: string; acce
 export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string }) {
   const buyIn = (TIERS.find((t) => t.key === tier) ?? TIERS[0]).buyIn;
   const room = useRoom(fixtureId, `${fixtureId}-${tier}`, buyIn, RAKE_BPS);
-  const liveMarkets = useLiveMarkets(fixtureId, room.isReplay);
 
   // Local tick so the per-row lock countdowns update without feed events.
   const [, setTick] = useState(0);
@@ -58,6 +79,7 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
             {competition && <span className="hidden text-[11px] text-faint sm:inline">{competition}</span>}
             {room.isReplay && <span className="pill px-2 py-0.5 text-[10px] text-faint">REPLAY</span>}
             {room.clock.running && <LivePill minute={room.clock.minute} />}
+            <ShareButton />
           </div>
         </header>
 
@@ -113,11 +135,11 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
           <PredictionSlip markets={room.markets} phase={room.phase} lockAt={room.lockAt} onPredict={room.predict} />
         )}
 
-        {/* live-wave markets — compact rows sliding in */}
-        {room.phase !== "ended" && <LiveBets markets={liveMarkets.live} />}
+        {/* live-wave markets — one-tap free-play picks; you + bots score live */}
+        {room.phase !== "ended" && <LiveBets markets={room.liveMarkets} onPredict={room.predict} />}
 
         {/* context stats — display only, below the actionable markets */}
-        {room.phase !== "ended" && <StatsBar home={homeShort || home} away={awayShort || away} stats={liveMarkets.stats} />}
+        {room.phase !== "ended" && <StatsBar home={homeShort || home} away={awayShort || away} stats={room.stats} />}
 
         <EventTicker events={room.events} />
       </div>

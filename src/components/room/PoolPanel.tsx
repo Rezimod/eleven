@@ -2,6 +2,7 @@ export interface StandingRow {
   player: string;
   points: number;
   isYou: boolean;
+  isBot?: boolean;
 }
 
 function initials(name: string): string {
@@ -30,7 +31,7 @@ export function Standings({ standings, pot }: { standings: StandingRow[]; pot: n
           {top.map((s) => (
             <li
               key={s.player}
-              title={`${s.player} · ${s.points.toLocaleString()} pts`}
+              title={`${s.player}${s.isBot ? " · bot" : ""} · ${s.points.toLocaleString()} pts`}
               className={`flex shrink-0 items-center gap-1.5 rounded-full py-1 pl-1 pr-2.5 ${
                 s.isYou ? "bg-[rgba(198,255,58,0.12)] ring-1 ring-[rgba(198,255,58,0.35)]" : "bg-panel2"
               }`}
@@ -40,7 +41,7 @@ export function Standings({ standings, pot }: { standings: StandingRow[]; pot: n
                   s.isYou ? "bg-lime text-[#0a0d12]" : "bg-[rgba(255,255,255,0.08)] text-muted"
                 }`}
               >
-                {s.isYou ? "YOU" : initials(s.player)}
+                {s.isYou ? "YOU" : s.isBot ? "🤖" : initials(s.player)}
               </span>
               <span className={`num text-xs ${s.isYou ? "text-lime" : "text-text"}`}>{s.points.toLocaleString()}</span>
             </li>

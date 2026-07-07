@@ -172,6 +172,21 @@ export function createRoom(cfg: RoomConfig): Room {
   };
 }
 
+/**
+ * Add a market to an open room after creation. Free-play only — the on-chain path
+ * commits its markets inline at creation; this backs the live-wave generator, which
+ * opens provable markets as the match unfolds. Mirrors createRoom's per-market init.
+ */
+export function addMarket(room: Room, spec: MarketSpec): Room {
+  if (room.markets.some((m) => m.id === spec.id)) return room;
+  if (spec.yesPoints <= 0 || spec.noPoints <= 0) throw new Error("market points must be positive");
+  return {
+    ...room,
+    markets: [...room.markets, spec],
+    marketState: { ...room.marketState, [spec.id]: { resolved: false } },
+  };
+}
+
 export function joinRoom(room: Room, player: string, now: number): Room {
   if (room.status !== "open") throw new Error("room is not open");
   if (now >= room.joinDeadline) throw new Error("join window closed");
