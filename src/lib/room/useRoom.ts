@@ -34,13 +34,19 @@ const YOU = "You";
 // countdown from when the user entered the room. Sitting in the lobby never locks them.
 const PRE_MATCH_LOCK_LEAD_SEC = 60;
 const CORNERS_LINE = 6;
+const GOALS_LINE = 2;
 
-/** How a pre-match market maps onto the live feed for resolution (UI-only metadata). */
+/**
+ * How a pre-match market maps onto the live feed for resolution (UI-only
+ * metadata). Every kind settles ONLY on goals / corners / cards — never on
+ * shots, fouls or possession.
+ */
 type Resolver =
-  | { kind: "nextGoalHome" }
-  | { kind: "cornersOver"; line: number }
-  | { kind: "redCard" }
-  | { kind: "homeOutscore" };
+  | { kind: "nextGoalTeam" } // yes = home scores next; FT with no goal → no
+  | { kind: "statOver"; stat: "goals" | "corners"; line: number } // monotone O/U
+  | { kind: "redCard" } // monotone
+  | { kind: "btts" } // monotone yes; FT → no
+  | { kind: "htHomeLead" }; // decided at half-time from the HT score
 
 interface MarketDef {
   spec: MarketSpec;
@@ -54,6 +60,7 @@ function buildMarkets(fixtureId: number, home: string, away: string, lockTs: num
     id: string,
     label: string,
     statKey: number,
+    period: number,
     threshold: number,
     yesProb: number,
     resolver: Resolver,
@@ -66,7 +73,7 @@ function buildMarkets(fixtureId: number, home: string, away: string, lockTs: num
         id: `${fixtureId}-${id}`,
         label,
         statKey,
-        period: 0,
+        period,
         threshold,
         comparison: "GreaterThan",
         lockTs,
@@ -80,10 +87,12 @@ function buildMarkets(fixtureId: number, home: string, away: string, lockTs: num
     };
   };
   return [
-    m("goal", "Next goal is scored by", 1, 0, 0.5, { kind: "nextGoalHome" }, home, away),
-    m("corners", `Total corners over ${CORNERS_LINE}`, 6, CORNERS_LINE, 0.52, { kind: "cornersOver", line: CORNERS_LINE }, "Over", "Under"),
-    m("red", "A red card is shown", 8, 0, 0.24, { kind: "redCard" }, "Yes", "No"),
-    m("outscore", `${home} outscore ${away}`, 1, 0, 0.5, { kind: "homeOutscore" }, home, away),
+    m("goal", "Next goal is scored by", STAT_KEY.GOALS, 0, 0, 0.5, { kind: "nextGoalTeam" }, home, away),
+    m("goals-ou", `Total goals over ${GOALS_LINE}.5`, STAT_KEY.GOALS, 0, GOALS_LINE, 0.48, { kind: "statOver", stat: "goals", line: GOALS_LINE }, "Over", "Under"),
+    m("corners-ou", `Total corners over ${CORNERS_LINE}.5`, STAT_KEY.CORNERS, 0, CORNERS_LINE, 0.52, { kind: "statOver", stat: "corners", line: CORNERS_LINE }, "Over", "Under"),
+    m("btts", "Both teams to score", STAT_KEY.GOALS, 0, 0, 0.55, { kind: "btts" }, "Yes", "No"),
+    m("red", "A red card is shown", STAT_KEY.RED_CARDS, 0, 0, 0.24, { kind: "redCard" }, "Yes", "No"),
+    m("ht-lead", `Half-time: ${home} leading`, STAT_KEY.GOALS, 1, 0, 0.38, { kind: "htHomeLead" }, "Yes", "No"),
   ];
 }
 
@@ -94,6 +103,8 @@ function statValue(stats: FixtureStats, statKey: number): number {
       return stats.goals;
     case STAT_KEY.CORNERS:
       return stats.corners;
+    case STAT_KEY.CARDS:
+      return stats.cards;
     case STAT_KEY.RED_CARDS:
       return stats.redCards;
     default:
@@ -111,6 +122,7 @@ function foldStats(prev: FixtureStats, e: MatchEvent): FixtureStats {
     awayGoals: scored ? e.score.away : prev.awayGoals,
     goals: e.score.home + e.score.away,
     corners: prev.corners + (e.kind === "corner" ? 1 : 0),
+    cards: prev.cards + (e.kind === "card" ? 1 : 0),
     redCards: prev.redCards + (e.kind === "card" && e.card === "red" ? 1 : 0),
     shots: e.stats?.shots ?? prev.shots,
     shotsOnTarget: e.stats?.shotsOnTarget ?? prev.shotsOnTarget,
@@ -174,25 +186,49 @@ function initial(fixtureId: number, roomId: string): State {
   };
 }
 
-/** Resolve a pre-match market from the current feed-derived stats. */
-function resolvePreMatch(room: Room, def: MarketDef, s: State, goalTeam?: "home" | "away"): Room {
+interface ResolveCtx {
+  /** Set on a goal event — decides the next-goal market. */
+  goalTeam?: "home" | "away";
+  /** True once the half-time whistle (or later) has been seen. */
+  htReached: boolean;
+  fulltime: boolean;
+}
+
+/**
+ * Resolve a pre-match market the moment its outcome is DECIDED by the feed —
+ * monotone markets settle `yes` the instant their stat crosses (mirroring the
+ * on-chain ProveYes path), everything undecided settles `no` at full time
+ * (the TimeoutNo path). Returns the room unchanged while still undecidable.
+ */
+function resolvePreMatch(room: Room, def: MarketDef, s: State, ctx: ResolveCtx): Room {
   if (room.marketState[def.spec.id]?.resolved) return room;
-  let outcome: boolean;
+  let outcome: boolean | null = null;
   switch (def.resolver.kind) {
-    case "nextGoalHome":
-      outcome = goalTeam === "home";
+    case "nextGoalTeam":
+      if (ctx.goalTeam) outcome = ctx.goalTeam === "home";
+      else if (ctx.fulltime) outcome = false;
       break;
-    case "cornersOver":
-      outcome = s.stats.corners > def.resolver.line;
+    case "statOver": {
+      const v = def.resolver.stat === "goals" ? s.stats.goals : s.stats.corners;
+      if (v > def.resolver.line) outcome = true;
+      else if (ctx.fulltime) outcome = false;
       break;
+    }
     case "redCard":
-      outcome = s.stats.redCards > 0;
+      if (s.stats.redCards > 0) outcome = true;
+      else if (ctx.fulltime) outcome = false;
       break;
-    case "homeOutscore":
-      outcome = s.score.home > s.score.away;
+    case "btts":
+      if (s.stats.homeGoals > 0 && s.stats.awayGoals > 0) outcome = true;
+      else if (ctx.fulltime) outcome = false;
+      break;
+    case "htHomeLead":
+      // Decided by the score when the half-time whistle is first seen (the
+      // clock event at HT lands before any second-half goal moves the score).
+      if (ctx.htReached || ctx.fulltime) outcome = s.score.home > s.score.away;
       break;
   }
-  return resolveMarket(room, def.spec.id, outcome);
+  return outcome === null ? room : resolveMarket(room, def.spec.id, outcome);
 }
 
 /**
@@ -280,14 +316,15 @@ function reducer(state: State, a: Action): State {
         }
       }
 
-      // 2) Resolve markets from the stats this event produced.
-      if (e.kind === "goal") {
-        const goalDef = s.defs.find((d) => d.resolver.kind === "nextGoalHome" && !room.marketState[d.spec.id]?.resolved);
-        if (goalDef) room = resolvePreMatch(room, goalDef, s, e.team === "home" ? "home" : "away");
-      }
-      if (fulltime) {
-        for (const d of s.defs) room = resolvePreMatch(room, d, s);
-      }
+      // 2) Resolve pre-match markets the moment the feed decides them: monotone
+      // crossings settle yes instantly, half-time decides the HT market, and
+      // everything left settles no at full time.
+      const ctx: ResolveCtx = {
+        goalTeam: e.kind === "goal" ? e.team : undefined,
+        htReached: e.clock.period === "HT" || e.clock.period === "2H",
+        fulltime,
+      };
+      for (const d of s.defs) room = resolvePreMatch(room, d, s, ctx);
       room = resolveLive(room, liveDefs, a.stats, a.nowSec, fulltime);
 
       return { ...s, room, liveDefs, ended: fulltime };

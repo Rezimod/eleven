@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { MatchSummary } from "@/lib/feed";
 import { LivePill, TeamFlag } from "@/components/Brand";
 
@@ -11,11 +14,19 @@ export const TIERS = [
   { key: "high", label: "0.1 ◎", buyIn: 100_000_000 },
 ] as const;
 
-/** A fixture card that opens a room at a chosen buy-in tier. */
+/** A fixture card — the WHOLE card opens the room (default entry tier); the
+ *  entry chips deep-link a specific stake. */
 export function RoomCard({ m }: { m: MatchSummary }) {
+  const router = useRouter();
   const live = m.status === "live";
   return (
-    <div className="card p-4">
+    <div
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(`/match/${m.fixtureId}?tier=${TIERS[0].key}`)}
+      onKeyDown={(e) => e.key === "Enter" && router.push(`/match/${m.fixtureId}?tier=${TIERS[0].key}`)}
+      className="card cursor-pointer p-4 transition hover:brightness-110 active:scale-[0.995]"
+    >
       <div className="mb-3 flex items-center justify-between text-xs">
         <span className="text-muted">{m.competition}</span>
         {live ? <LivePill minute={m.minute} /> : <span className="pill text-faint">{m.kickoffLabel}</span>}
@@ -39,19 +50,17 @@ export function RoomCard({ m }: { m: MatchSummary }) {
         </div>
       </div>
 
-      <div className="mt-4 flex items-center gap-2">
-        <span className="text-xs text-muted">Buy-in (demo ◎)</span>
-        <div className="ml-auto flex gap-2">
-          {TIERS.map((t) => (
-            <Link
-              key={t.key}
-              href={`/match/${m.fixtureId}?tier=${t.key}`}
-              className={`pill ${t.key === "low" ? "pill-lime" : "text-text"} hover:brightness-110`}
-            >
-              {t.label}
-            </Link>
-          ))}
-        </div>
+      <div className="mt-3 flex items-center justify-end gap-2">
+        {TIERS.map((t) => (
+          <Link
+            key={t.key}
+            href={`/match/${m.fixtureId}?tier=${t.key}`}
+            onClick={(e) => e.stopPropagation()}
+            className={`pill ${t.key === "low" ? "pill-lime" : "text-text"} hover:brightness-110`}
+          >
+            Entry {t.label}
+          </Link>
+        ))}
       </div>
     </div>
   );

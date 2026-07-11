@@ -114,11 +114,12 @@ function scenario(buyIn = 1_000) {
   return r;
 }
 
-test("points come only from correct predictions, tallied across markets", () => {
+test("points come only from correct predictions; wrong picks cost the small penalty", () => {
   const r = scenario();
-  assert.equal(playerPoints(r, "alice"), 100); // m0 yes ✓ (+100), m1 yes ✗ (0)
+  // Penalty = 10% of the pick's frozen award (WRONG_PICK_PENALTY_BPS = 1000).
+  assert.equal(playerPoints(r, "alice"), 94); // m0 yes ✓ (+100), m1 yes ✗ (−6 of frozen 60)
   assert.equal(playerPoints(r, "bob"), 180); // m0 yes ✓ (+100), m1 no ✓ (+80)
-  assert.equal(playerPoints(r, "carol"), 0); // m0 no ✗
+  assert.equal(playerPoints(r, "carol"), -5); // m0 no ✗ (−5 of frozen 50) — signed total
   assert.deepEqual(
     standings(r).map((s) => s.player),
     ["bob", "alice", "carol"],

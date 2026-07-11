@@ -157,13 +157,12 @@ pub fn handle_resolve_market<'info>(
         }
         prev = Some(pred.owner);
 
-        if pred.side == win_side {
-            // FROZEN, capped snapshot from reveal — never recomputed here.
-            part.points = part
-                .points
-                .checked_add(pred.award_points as u64)
-                .ok_or(ElevenError::MathOverflow)?;
-        }
+        // FROZEN, capped snapshot from reveal — never recomputed here. Correct
+        // adds the award; wrong costs the small anti-drain penalty.
+        part.points = part
+            .points
+            .checked_add(score_delta(pred.award_points, pred.side == win_side))
+            .ok_or(ElevenError::MathOverflow)?;
         pred.scored = true;
         pred.exit(ctx.program_id)?;
         part.exit(ctx.program_id)?;

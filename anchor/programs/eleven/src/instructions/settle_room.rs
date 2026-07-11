@@ -57,11 +57,13 @@ pub fn handle_settle_room<'info>(ctx: Context<'info, SettleRoom<'info>>) -> Resu
     );
 
     struct Row {
-        points: u64,
+        points: i64,
         wallet_idx: usize,
     }
     let mut rows: Vec<Row> = Vec::with_capacity(player_count as usize);
-    let mut max_points: u64 = 0;
+    // Points are signed (wrong-pick penalties) — the winner is max, even if
+    // every total is negative, so start below any representable score.
+    let mut max_points: i64 = i64::MIN;
     let mut prev: Option<Pubkey> = None;
 
     for (i, pair) in rem.chunks(2).enumerate() {

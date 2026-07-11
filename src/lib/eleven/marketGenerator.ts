@@ -18,13 +18,15 @@ import { marketPoints, type Comparison, type MarketSpec } from "./core.ts";
 
 // ── provable stats — the ONLY stats a market may settle on ────────────────────
 
-/** Stat keys TxLINE proves and the on-chain `validate_stat` can verify. */
-export const STAT_KEY = { GOALS: 1, CORNERS: 6, RED_CARDS: 8 } as const;
+/** Stat keys TxLINE proves and the on-chain `validate_stat` can verify.
+ *  CARDS = bookings of any colour (goals/corners/cards are the provable set). */
+export const STAT_KEY = { GOALS: 1, CORNERS: 6, CARDS: 7, RED_CARDS: 8 } as const;
 
 /** The whitelist. A predicate's `statKey` MUST be in here or it can't settle. */
 export const PROVABLE_STAT_KEYS: ReadonlySet<number> = new Set([
   STAT_KEY.GOALS,
   STAT_KEY.CORNERS,
+  STAT_KEY.CARDS,
   STAT_KEY.RED_CARDS,
 ]);
 
@@ -41,6 +43,8 @@ export interface FixtureStats {
   homeGoals: number;
   awayGoals: number;
   corners: number;
+  /** Bookings of any colour. */
+  cards: number;
   redCards: number;
   // context — TRIGGER-ONLY / DISPLAY-ONLY, a market may NEVER settle on these
   shots: number;
@@ -60,6 +64,7 @@ export function emptyStats(minute = 0): FixtureStats {
     homeGoals: 0,
     awayGoals: 0,
     corners: 0,
+    cards: 0,
     redCards: 0,
     shots: 0,
     shotsOnTarget: 0,
@@ -254,6 +259,18 @@ export const DEFAULT_BASELINE_TEMPLATES: BaselineTemplate[] = [
     }),
   },
   {
+    id: "base-any-card",
+    predicate: (now) => ({
+      statKey: STAT_KEY.CARDS,
+      threshold: now.cards, // yes iff another booking (any colour)
+      comparison: "GreaterThan",
+      yesProb: 0.42,
+      title: "A card in the next few minutes?",
+      yesLabel: "Card",
+      noLabel: "No card",
+    }),
+  },
+  {
     id: "base-card",
     predicate: (now) => ({
       statKey: STAT_KEY.RED_CARDS,
@@ -261,8 +278,8 @@ export const DEFAULT_BASELINE_TEMPLATES: BaselineTemplate[] = [
       comparison: "GreaterThan",
       yesProb: 0.18,
       title: "A red card in the next few minutes?",
-      yesLabel: "Card",
-      noLabel: "No card",
+      yesLabel: "Red card",
+      noLabel: "No red",
     }),
   },
 ];
@@ -295,9 +312,11 @@ function predicateCrossed(stats: FixtureStats, spec: MarketSpec): boolean {
       ? stats.goals
       : spec.statKey === STAT_KEY.CORNERS
         ? stats.corners
-        : spec.statKey === STAT_KEY.RED_CARDS
-          ? stats.redCards
-          : 0;
+        : spec.statKey === STAT_KEY.CARDS
+          ? stats.cards
+          : spec.statKey === STAT_KEY.RED_CARDS
+            ? stats.redCards
+            : 0;
   return value > spec.threshold;
 }
 

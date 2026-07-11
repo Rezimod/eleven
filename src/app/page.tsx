@@ -9,7 +9,7 @@ import { feedMode, getFeed, type MatchSummary } from "@/lib/feed";
 function FixtureGroup({ title, tag, matches }: { title: string; tag?: string; matches: MatchSummary[] }) {
   if (matches.length === 0) return null;
   return (
-    <section className="mt-8">
+    <section className="mt-6">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="eyebrow text-muted">{title}</h2>
         {tag ? (
@@ -51,21 +51,14 @@ export default function Lobby() {
         </div>
       </header>
 
-      <section className="mt-10">
-        <h1 className="display text-[52px] leading-[0.92]">
-          PICK A ROOM
-          <br />
-          <span className="text-lime">CALL THE GAME</span>
+      <section className="mt-6">
+        <h1 className="display text-[34px] leading-[0.95]">
+          PICK A ROOM · <span className="text-lime">CALL THE GAME</span>
         </h1>
-        <p className="mt-4 text-sm leading-relaxed text-muted">
-          Fixed buy-in rooms, poker-tournament fair — every seat is paid (demo devnet SOL) into an
-          on-chain escrow. Points come only from correct calls, not your stake. Top score takes the
-          pot, settled on-chain from TxLINE proofs.
-        </p>
       </section>
 
       {matches.length === 0 ? (
-        <section className="mt-8">
+        <section className="mt-6">
           <div className="card p-6 text-center text-sm text-muted">
             {mode === "live" ? "No fixtures from TxLINE right now." : "Loading fixtures…"}
           </div>
@@ -82,9 +75,6 @@ export default function Lobby() {
         </>
       )}
 
-      <footer className="mt-12 border-t border-line pt-4 text-center text-xs text-faint">
-        Fixed buy-in · capped rake · winner-takes-pot · every outcome verifiable on-chain
-      </footer>
     </main>
   );
 }

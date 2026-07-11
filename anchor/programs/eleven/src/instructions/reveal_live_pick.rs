@@ -68,14 +68,13 @@ pub fn handle_reveal_live_pick(
         ElevenError::BadMerkleProof,
     );
 
+    // Correct adds the frozen award; wrong costs the small anti-drain penalty.
     let outcome_side: u8 = if market.outcome { 1 } else { 0 };
-    if side == outcome_side {
-        let part = &mut ctx.accounts.participant;
-        part.points = part
-            .points
-            .checked_add(award_points as u64)
-            .ok_or(ElevenError::MathOverflow)?;
-    }
+    let part = &mut ctx.accounts.participant;
+    part.points = part
+        .points
+        .checked_add(score_delta(award_points, side == outcome_side))
+        .ok_or(ElevenError::MathOverflow)?;
 
     let lp = &mut ctx.accounts.live_pick;
     lp.room = room.key();

@@ -588,21 +588,33 @@ fn bad_reveal_is_rejected() {
 fn bigger_buy_in_yields_no_extra_points() {
     // Same predictions in a free-play room (buy-in 0) and a paid room (buy-in
     // large) produce identical points — stake never buys points.
-    fn top_points(buy_in: u64) -> u64 {
+    fn top_points(buy_in: u64) -> i64 {
         let mut r = Room::new(buy_in, 0, 2, vec![market(100, 50)]);
         r.predict(0, 0, 1); // YES
         r.predict(1, 0, 0); // NO
         r.resolve_yes(0, r.owners()).expect("resolve");
         let part = participant_pda(&r.room, &r.players[0].pubkey());
         let acc = r.svm.get_account(&part).unwrap();
-        // Participant layout: 8 disc + 32 room + 32 owner + 8 points …
-        let points = u64::from_le_bytes(acc.data[72..80].try_into().unwrap());
+        // Participant layout: 8 disc + 32 room + 32 owner + 8 points (i64) …
+        let points = i64::from_le_bytes(acc.data[72..80].try_into().unwrap());
         points
     }
     let free = top_points(0);
     let paid = top_points(5 * BUY_IN);
     assert_eq!(free, 100, "points come from the market, not the stake");
     assert_eq!(free, paid, "a bigger buy-in yields no extra points");
+}
+
+#[test]
+fn wrong_pick_costs_small_penalty_and_totals_can_go_negative() {
+    // ANTI-DRAIN: a wrong revealed pick costs WRONG_PICK_PENALTY_BPS (10%) of
+    // its frozen award — spraying markets is negative-EV, skill still dominates.
+    let mut r = Room::new(BUY_IN, RAKE_BPS, 2, vec![market(100, 60)]);
+    r.predict(0, 0, 1); // YES, correct → +100
+    r.predict(1, 0, 0); // NO, wrong → -floor(60 * 10%) = -6
+    r.resolve_yes(0, r.owners()).expect("resolve");
+    assert_eq!(read_points(&r.svm, &r.room, &r.players[0].pubkey()), 100);
+    assert_eq!(read_points(&r.svm, &r.room, &r.players[1].pubkey()), -6);
 }
 
 #[test]
@@ -701,7 +713,7 @@ fn read_room(svm: &LiteSVM, room: &Pubkey) -> RoomAccount {
     let acc = svm.get_account(room).unwrap();
     RoomAccount::try_deserialize(&mut &acc.data[..]).unwrap()
 }
-fn read_points(svm: &LiteSVM, room: &Pubkey, owner: &Pubkey) -> u64 {
+fn read_points(svm: &LiteSVM, room: &Pubkey, owner: &Pubkey) -> i64 {
     let acc = svm.get_account(&participant_pda(room, owner)).unwrap();
     Participant::try_deserialize(&mut &acc.data[..]).unwrap().points
 }
@@ -798,7 +810,7 @@ fn live_pick_merkle_commit_reveal_scores_and_settles() {
     send(&mut r.svm, &[reveal_live_pick_ix(&r.room, &a, 0, 1, 200, salt_a, proof_a.clone())], &pa, &[&pa]).expect("reveal A");
     send(&mut r.svm, &[reveal_live_pick_ix(&r.room, &b, 0, 0, 60, salt_b, proof_b)], &pb, &[&pb]).expect("reveal B");
     assert_eq!(read_points(&r.svm, &r.room, &a), 200, "A (YES, correct) scored frozen 200");
-    assert_eq!(read_points(&r.svm, &r.room, &b), 0, "B (NO, wrong) scored 0");
+    assert_eq!(read_points(&r.svm, &r.room, &b), -6, "B (NO, wrong) pays the small penalty: -10% of frozen 60");
 
     // A pick not in the committed root is rejected.
     let bogus = vec![ProofNode { hash: [7u8; 32], is_right_sibling: true }];

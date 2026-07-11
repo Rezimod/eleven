@@ -114,7 +114,9 @@ pub struct Participant {
     pub room: Pubkey,
     pub owner: Pubkey,
     /// Earned strictly from correct, revealed predictions — never from stake.
-    pub points: u64,
+    /// Signed: a wrong pick costs a small penalty (`WRONG_PICK_PENALTY_BPS` of
+    /// its frozen award), so totals can dip below zero. Winner is still max.
+    pub points: i64,
     /// Exact buy-in escrowed (for a precise refund).
     pub buy_in_paid: u64,
     pub refunded: bool,

@@ -29,6 +29,23 @@ pub const MAX_MARKETS: usize = 8;
 /// dominate the pot. Matches the core engine's `MAX_MARKET_POINTS`.
 pub const MAX_POINTS_PER_MARKET: u32 = 1_000;
 
+/// ANTI-DRAIN penalty: a WRONG revealed pick costs this fraction (basis points)
+/// of its frozen potential gain. Small by design — deters spraying every market
+/// for free upside without dominating skill. Matches the core engine's
+/// `WRONG_PICK_PENALTY_BPS`; 1_000 = 10% of the pick's frozen award.
+pub const WRONG_PICK_PENALTY_BPS: u64 = 1_000;
+
+/// The signed points delta a scored pick produces: +frozen award if it matched
+/// the proven outcome, −the small penalty if it did not. Deterministic and
+/// reproducible from committed picks + proven outcomes alone.
+pub fn score_delta(award_points: u32, correct: bool) -> i64 {
+    if correct {
+        award_points as i64
+    } else {
+        -(((award_points as u64) * WRONG_PICK_PENALTY_BPS / 10_000) as i64)
+    }
+}
+
 /// The TxOracle program `resolve_market` CPIs into (devnet for the hackathon;
 /// swap to `txline_settlement::TXORACLE_MAINNET` for production). Verified in
 /// `docs/txline-notes.md` and the vendored IDL `anchor/idl/txoracle.json`.

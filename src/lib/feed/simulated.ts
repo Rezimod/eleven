@@ -94,7 +94,7 @@ function speed(): number {
   return Number.isFinite(s) && s > 0 ? s : 1;
 }
 
-/** The one fixture that is already LIVE (Quick Play target); the rest are upcoming. */
+/** The one fixture that is already LIVE; the rest are upcoming. */
 const LIVE_INDEX = 0;
 
 /**

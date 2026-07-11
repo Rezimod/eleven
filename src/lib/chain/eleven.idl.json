@@ -1540,9 +1540,11 @@
           {
             "name": "points",
             "docs": [
-              "Earned strictly from correct, revealed predictions — never from stake."
+              "Earned strictly from correct, revealed predictions — never from stake.",
+              "Signed: a wrong pick costs a small penalty (`WRONG_PICK_PENALTY_BPS` of",
+              "its frozen award), so totals can dip below zero. Winner is still max."
             ],
-            "type": "u64"
+            "type": "i64"
           },
           {
             "name": "buy_in_paid",

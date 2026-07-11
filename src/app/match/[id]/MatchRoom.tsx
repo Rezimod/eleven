@@ -135,6 +135,17 @@ function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) 
     default:
       body = (
         <>
+          {/* payment methods: demo crypto is live; fiat is display-only */}
+          <div className="mb-3 flex flex-col gap-1.5">
+            <div className="flex items-center justify-between rounded-[12px] bg-panel2 px-3 py-2 ring-1 ring-[rgba(198,255,58,0.4)]">
+              <span className="text-[13px] font-semibold">◎ Demo SOL — devnet wallet</span>
+              <span className="pill pill-lime px-2 py-0.5 text-[9px]">SELECTED</span>
+            </div>
+            <div aria-disabled className="flex items-center justify-between rounded-[12px] bg-panel2 px-3 py-2 opacity-45">
+              <span className="text-[13px] font-semibold">🏦 Bank transfer</span>
+              <span className="pill px-2 py-0.5 text-[9px] text-faint">COMING SOON</span>
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => chain.join()}
@@ -264,7 +275,7 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
           </div>
 
           {room.phase === "ended" && (
-            <WinnerBanner winners={room.winners} payouts={room.payouts} buyIn={buyIn} rake={room.rake} />
+            <WinnerBanner winners={room.winners} payouts={room.payouts} rake={room.rake} />
           )}
 
           {/* pre-match markets — compact rows (resolved rows keep their receipts) */}

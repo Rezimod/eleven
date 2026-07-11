@@ -141,12 +141,16 @@ test("every menu market settles on a provable stat — none on shots/fouls/posse
 
 // ── no duplicates / cooldown ──────────────────────────────────────────────────
 
-test("a template does not re-open while its market is still live", () => {
+test("a template never duplicates: a crossed market retires, cooldown blocks a re-fire", () => {
   const g = gen();
   assert.deepEqual(opens(g.update(stats({ corners: 2 }), 10)), ["corner-streak"]);
-  // Another corner burst while the first is still live → no second market.
-  assert.deepEqual(opens(g.update(stats({ corners: 4 }), 20)), []);
-  assert.equal(g.live().filter((m) => m.templateId === "corner-streak").length, 1);
+  // Another burst CROSSES the frozen line (4 > 3): the market is decided, so the
+  // generator retires it — and the 300s cooldown blocks an immediate re-open.
+  // At no point do two live instances of one template exist.
+  const evs = g.update(stats({ corners: 4 }), 20);
+  assert.deepEqual(opens(evs), []);
+  assert.equal(evs.filter((e) => e.type === "expire" && e.market.templateId === "corner-streak").length, 1);
+  assert.equal(g.live().filter((m) => m.templateId === "corner-streak").length, 0);
 });
 
 test("cooldown blocks an immediate re-fire after expiry", () => {
