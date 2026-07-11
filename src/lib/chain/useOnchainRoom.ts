@@ -97,7 +97,13 @@ export function useOnchainRoom(fixtureId: number, buyInLamports: number, kickoff
       await refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setError(/reject|denied|cancel/i.test(msg) ? "approval declined — nothing was paid" : msg);
+      setError(
+        /reject|denied|cancel/i.test(msg)
+          ? "cancelled — nothing was paid"
+          : /insufficient|0x1\b/i.test(msg)
+            ? "not enough demo money — top up and try again"
+            : msg,
+      );
     } finally {
       setTxPhase("idle");
       inFlight.current = false;

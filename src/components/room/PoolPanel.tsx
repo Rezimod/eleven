@@ -1,3 +1,5 @@
+import { fmtUsd } from "@/lib/chain/config";
+
 export interface StandingRow {
   player: string;
   points: number;
@@ -20,8 +22,8 @@ export function Standings({ standings, pot }: { standings: StandingRow[]; pot: n
   return (
     <div className="card flex items-center gap-3 px-3 py-2">
       <div className="shrink-0">
-        <div className="eyebrow text-[9px] text-faint">Pot</div>
-        <div className="num text-sm leading-none text-lime">{(pot / 1e9).toFixed(2)}</div>
+        <div className="eyebrow text-[9px] text-lime">Pot</div>
+        <div className="num text-lg font-bold leading-none text-lime">{fmtUsd(pot)}</div>
       </div>
       <div className="h-7 w-px shrink-0 bg-line" />
       {top.length === 0 ? (

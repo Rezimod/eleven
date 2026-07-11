@@ -7,7 +7,7 @@ import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
 import { utils } from "@coral-xyz/anchor";
 import type { Transaction } from "@solana/web3.js";
 
-import { LAMPORTS_PER_SOL, RPC_URL, SOLANA_CHAIN, WS_URL, getConnection } from "@/lib/chain/config";
+import { RPC_URL, SOLANA_CHAIN, TARGET_DEMO_LAMPORTS, WS_URL, getConnection } from "@/lib/chain/config";
 
 /**
  * Real wallet auth via Privy: email sign-in → embedded Solana wallet on DEVNET,
@@ -19,8 +19,6 @@ export const PRIVY_SETUP_HINT =
   "Set NEXT_PUBLIC_PRIVY_APP_ID=<your Privy app id> in .env.local — create a free app at " +
   "https://dashboard.privy.io (enable Email login + Solana embedded wallets), then restart `npm run dev`.";
 
-/** Auto-top-up trigger: below this, a fresh sign-in gets demo SOL airdropped. */
-const AUTO_FUND_BELOW_LAMPORTS = 0.05 * LAMPORTS_PER_SOL;
 
 export interface WalletState {
   /** False until NEXT_PUBLIC_PRIVY_APP_ID is set — sign-in is unavailable. */
@@ -93,11 +91,13 @@ function InnerWalletProvider({ children }: { children: React.ReactNode }) {
     }
   }, [address, funding, refreshBalance]);
 
-  // DEMO funding on first sign-in: if the fresh embedded wallet is (near) empty,
-  // airdrop devnet SOL so there's something to play with. Once per address per session.
+  // GUARANTEED $50 DEMO BALANCE: on sign-in, any account below the target is
+  // topped up to it automatically — a brand-new account starts at $50.00 and
+  // can play instantly. Once per address per session; manual "Top up to $50"
+  // covers mid-session shortfalls.
   useEffect(() => {
     if (!authenticated || !address || balanceLamports === null) return;
-    if (balanceLamports >= AUTO_FUND_BELOW_LAMPORTS) return;
+    if (balanceLamports >= TARGET_DEMO_LAMPORTS) return;
     if (autoFunded.current.has(address)) return;
     autoFunded.current.add(address);
     topUp().catch(() => {

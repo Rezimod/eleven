@@ -45,8 +45,8 @@ export function LiveBets({ markets, onPredict }: { markets: LiveMarketView[]; on
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <h3 className="eyebrow text-lime">Live waves</h3>
-        <span className="text-[11px] text-muted">opened by pressure · settle on proofs</span>
+        <h3 className="eyebrow text-lime">Live bets</h3>
+        <span className="text-[11px] text-muted">fresh odds as play unfolds</span>
       </div>
       {ordered.map((m) => (
         <LiveRow key={m.id} m={m} onPredict={onPredict} />

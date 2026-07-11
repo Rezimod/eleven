@@ -1,8 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { decimalOdds } from "@/lib/eleven";
 
 const GRACE_MS = 3_000; // "tap to undo" window before a pick commits
+
+/** Sportsbook decimal odds for a points value — "2.00", "1.52". */
+const fmtOdds = (points: number) => decimalOdds(points).toFixed(2);
 
 export interface RowPick {
   key: string;
@@ -52,10 +56,10 @@ function LockChip({ secs }: { secs: number }) {
     <span className={`pill shrink-0 px-2 py-0.5 text-[10px] ${urgent ? "pill-live" : "text-faint"}`}>
       {secs > 0 ? (
         <>
-          locks <span className="num">{fmtCountdown(secs)}</span>
+          locks in <span className="num">{fmtCountdown(secs)}</span>
         </>
       ) : (
-        "locked"
+        "awaiting result"
       )}
     </span>
   );
@@ -152,7 +156,8 @@ export function MarketRow({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <span className="text-[13px] text-muted">{p?.label}</span>
-          <span className="num text-sm text-lime">+{p?.points}</span>
+          {p && <span className="num text-[12px] text-faint">@{fmtOdds(p.points)}</span>}
+          {p && <span className="num text-sm text-lime">+{p.points} pts</span>}
           <span className="pill pill-lime px-2 py-0.5 text-[10px]">✓ in</span>
         </div>
       </div>
@@ -187,7 +192,8 @@ export function MarketRow({
             }}
           >
             <span className="text-[13px] font-bold">{p.label}</span>
-            <span className="num text-sm">+{p.points}</span>
+            <span className="num text-[12px] opacity-70">@{fmtOdds(p.points)}</span>
+            <span className="num text-sm">+{p.points} pts</span>
             <span className="text-[11px] font-semibold opacity-70">· undo</span>
           </span>
         </button>
@@ -215,16 +221,19 @@ export function MarketRow({
             type="button"
             onClick={() => tap(p.key)}
             disabled={locked}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-[12px] px-2 transition active:scale-[0.98]"
+            className="flex flex-1 flex-col items-center justify-center rounded-[12px] px-2 py-1.5 transition active:scale-[0.98]"
             style={{
-              minHeight: 44,
+              minHeight: 52,
               background: "var(--color-panel2)",
               border: "1px solid var(--color-line)",
               opacity: locked ? 0.4 : 1,
             }}
           >
-            <span className="text-[13px] font-semibold text-text">{p.label}</span>
-            <span className="num text-[13px] text-lime">+{p.points}</span>
+            <span className="max-w-full truncate text-[12px] font-semibold text-text">{p.label}</span>
+            <span className="flex items-baseline gap-1.5">
+              <span className="num text-[15px] font-bold text-lime">{fmtOdds(p.points)}</span>
+              <span className="num text-[10px] text-faint">+{p.points} pts</span>
+            </span>
           </button>
         ))}
       </div>

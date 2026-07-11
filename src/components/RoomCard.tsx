@@ -6,12 +6,13 @@ import type { MatchSummary } from "@/lib/feed";
 import { LivePill, TeamFlag } from "@/components/Brand";
 
 /**
- * PAID ONLY — every tier moves a real (demo devnet SOL) buy-in into the room
- * escrow PDA on join. There is no free entry into a room.
+ * PAID ONLY — every tier moves a real (demo devnet SOL under the hood) buy-in
+ * into the room escrow PDA on join; the UI shows dollars at the fixed demo
+ * rate ($100/SOL → $5 and $10 entries). There is no free entry into a room.
  */
 export const TIERS = [
-  { key: "low", label: "0.05 ◎", buyIn: 50_000_000 },
-  { key: "high", label: "0.1 ◎", buyIn: 100_000_000 },
+  { key: "low", label: "$5", buyIn: 50_000_000 },
+  { key: "high", label: "$10", buyIn: 100_000_000 },
 ] as const;
 
 /** A fixture card — the WHOLE card opens the room (default entry tier); the

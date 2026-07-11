@@ -1,20 +1,19 @@
-import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 
 /**
- * DEMO funding faucet — DEVNET ONLY. Tops a player's embedded wallet up with
- * demo devnet SOL so they can pay room buy-ins. Refuses anything that smells
- * like mainnet, caps the target balance, and fixes the amount server-side.
+ * DEMO top-up — DEVNET ONLY. Tops a player's balance up to the guaranteed
+ * $50.00 demo balance (0.5 devnet SOL at the fixed internal $100/SOL rate),
+ * so every new account can play instantly and "Top up to $50" is one tap.
  *
- * Primary path: the public devnet faucet (`requestAirdrop`). Fallback (the
- * faucet rate-limits hard): a funded devnet keypair in DEMO_FAUCET_SECRET
- * (JSON secret-key array) transfers a smaller amount.
+ * RELIABILITY: the public devnet faucet rate-limits hard, so the PRIMARY
+ * path is a pre-funded faucet keypair (DEMO_FAUCET_SECRET, a JSON secret-key
+ * array — generate one, fund it with devnet SOL, keep it out of git). The
+ * public `requestAirdrop` is only the fallback when no keypair is set.
  */
 
 const RPC_URL = process.env.SOLANA_RPC ?? process.env.NEXT_PUBLIC_SOLANA_RPC ?? "https://api.devnet.solana.com";
-const AIRDROP_LAMPORTS = 1 * LAMPORTS_PER_SOL;
-const FAUCET_FALLBACK_LAMPORTS = 0.3 * LAMPORTS_PER_SOL;
-/** No more demo SOL for wallets already holding at least this. */
-const MAX_FUNDED_LAMPORTS = 2 * LAMPORTS_PER_SOL;
+/** $50.00 at the fixed demo rate of $100/SOL. Mirrors TARGET_DEMO_LAMPORTS. */
+const TARGET_LAMPORTS = 500_000_000;
 
 export async function POST(req: Request) {
   if (/mainnet/i.test(RPC_URL)) {
@@ -31,34 +30,41 @@ export async function POST(req: Request) {
 
   const conn = new Connection(RPC_URL, "confirmed");
   const balance = await conn.getBalance(address);
-  if (balance >= MAX_FUNDED_LAMPORTS) {
+  const deficit = TARGET_LAMPORTS - balance;
+  if (deficit <= 0) {
     return Response.json({ ok: true, method: "already-funded", lamports: 0, balance });
   }
 
-  try {
-    const signature = await conn.requestAirdrop(address, AIRDROP_LAMPORTS);
-    const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
-    await conn.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
-    return Response.json({ ok: true, method: "airdrop", lamports: AIRDROP_LAMPORTS, signature });
-  } catch {
-    /* devnet faucet rate-limited — try the local faucet keypair below */
+  // ── primary: the pre-funded faucet keypair (reliable, no rate limits) ──────
+  const secret = process.env.DEMO_FAUCET_SECRET;
+  if (secret) {
+    try {
+      const faucet = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(secret)));
+      const tx = new Transaction().add(
+        SystemProgram.transfer({ fromPubkey: faucet.publicKey, toPubkey: address, lamports: deficit }),
+      );
+      const signature = await sendAndConfirmTransaction(conn, tx, [faucet], { commitment: "confirmed" });
+      return Response.json({ ok: true, method: "faucet-keypair", lamports: deficit, signature });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // A drained faucet still falls through to the public airdrop below.
+      console.error(`demo faucet keypair transfer failed (${msg}); falling back to public airdrop`);
+    }
+  } else {
+    console.warn(
+      "DEMO_FAUCET_SECRET is not set — falling back to the rate-limited public devnet airdrop. " +
+        "Generate a keypair (solana-keygen new), fund it with devnet SOL, and set DEMO_FAUCET_SECRET " +
+        "to its JSON secret-key array for reliable demo funding.",
+    );
   }
 
-  const secret = process.env.DEMO_FAUCET_SECRET;
-  if (!secret) {
-    return new Response(
-      "devnet faucet rate-limited and no DEMO_FAUCET_SECRET fallback configured — try again in a minute",
-      { status: 503 },
-    );
-  }
+  // ── fallback: the public devnet faucet (rate-limited) ──────────────────────
   try {
-    const faucet = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(secret)));
-    const tx = new Transaction().add(
-      SystemProgram.transfer({ fromPubkey: faucet.publicKey, toPubkey: address, lamports: FAUCET_FALLBACK_LAMPORTS }),
-    );
-    const signature = await sendAndConfirmTransaction(conn, tx, [faucet], { commitment: "confirmed" });
-    return Response.json({ ok: true, method: "faucet-keypair", lamports: FAUCET_FALLBACK_LAMPORTS, signature });
-  } catch (e) {
-    return new Response(`faucet fallback failed: ${e instanceof Error ? e.message : String(e)}`, { status: 502 });
+    const signature = await conn.requestAirdrop(address, deficit);
+    const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
+    await conn.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
+    return Response.json({ ok: true, method: "airdrop", lamports: deficit, signature });
+  } catch {
+    return new Response("demo top-up unavailable right now — try again in a minute", { status: 503 });
   }
 }

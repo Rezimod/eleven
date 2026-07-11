@@ -32,3 +32,24 @@ export const LAMPORTS_PER_SOL = 1_000_000_000;
 export function fmtSol(lamports: number): string {
   return (lamports / LAMPORTS_PER_SOL).toFixed(2);
 }
+
+/**
+ * The UI is DOLLAR-denominated demo money, like a sportsbook — crypto stays
+ * entirely under the hood. Fixed internal demo rate: 1 SOL = $100, so the
+ * 0.05 / 0.1 SOL entry tiers read as $5 / $10 and the guaranteed demo
+ * balance of $50 is 0.5 devnet SOL.
+ */
+export const DEMO_USD_PER_SOL = 100;
+
+/** The demo balance every account is guaranteed on sign-in / top-up ($50). */
+export const TARGET_DEMO_LAMPORTS = 0.5 * LAMPORTS_PER_SOL;
+
+export function usd(lamports: number): number {
+  return (lamports / LAMPORTS_PER_SOL) * DEMO_USD_PER_SOL;
+}
+
+/** "$5" for whole dollars, "$4.85" otherwise — sportsbook-style. */
+export function fmtUsd(lamports: number): string {
+  const v = usd(lamports);
+  return Number.isInteger(v) ? `$${v}` : `$${v.toFixed(2)}`;
+}

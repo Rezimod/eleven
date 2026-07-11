@@ -1,15 +1,12 @@
 "use client";
 
 import { PRIVY_SETUP_HINT, useWallet } from "@/lib/wallet/useWallet";
-import { fmtSol } from "@/lib/chain/config";
-
-function shortAddr(a: string): string {
-  return `${a.slice(0, 4)}…${a.slice(-4)}`;
-}
+import { usd, TARGET_DEMO_LAMPORTS } from "@/lib/chain/config";
 
 /**
- * The header wallet control. Signed out → "Sign in" (Privy email → embedded
- * devnet wallet). Signed in → balance clearly labeled DEMO · devnet.
+ * The header balance control — sportsbook style, dollars only. Signed out →
+ * "Sign in". Signed in → a clean "$50.00 · DEMO" chip with a one-tap
+ * "Top up to $50" when the balance runs low. No crypto terms anywhere.
  */
 export function WalletChip() {
   const w = useWallet();
@@ -17,7 +14,7 @@ export function WalletChip() {
   if (!w.configured) {
     return (
       <button type="button" onClick={w.signIn} title={PRIVY_SETUP_HINT} className="pill text-faint hover:text-text">
-        wallet setup needed
+        sign-in setup needed
       </button>
     );
   }
@@ -30,19 +27,29 @@ export function WalletChip() {
     );
   }
 
+  const low = w.balanceLamports !== null && w.balanceLamports < TARGET_DEMO_LAMPORTS;
   return (
     <span className="flex items-center gap-1.5">
-      <span className="pill text-text" title={`${w.address} · demo devnet SOL, no real money`}>
-        <span className="num">{w.balanceLamports === null ? "…" : fmtSol(w.balanceLamports)} ◎</span>
-        <span className="ml-1.5 text-[9px] font-bold tracking-wide text-lime">DEMO · devnet</span>
-      </span>
+      {low && (
+        <button
+          type="button"
+          onClick={() => w.topUp().catch(() => {})}
+          disabled={w.funding}
+          className="pill pill-lime px-2 py-0.5 text-[10px] hover:brightness-110 disabled:opacity-60"
+        >
+          {w.funding ? "topping up…" : "Top up to $50"}
+        </button>
+      )}
       <button
         type="button"
         onClick={w.signOut}
-        title={`Sign out ${w.address ? shortAddr(w.address) : ""}`}
-        className="pill px-2 text-faint hover:text-text"
+        title="Demo money — not real funds. Tap to sign out."
+        className="pill text-text hover:brightness-110"
       >
-        ✕
+        <span className="num">
+          {w.balanceLamports === null ? "…" : `$${usd(w.balanceLamports).toFixed(2)}`}
+        </span>
+        <span className="ml-1.5 text-[9px] font-bold tracking-wide text-lime">DEMO</span>
       </button>
     </span>
   );

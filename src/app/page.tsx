@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Wordmark, FeedChip } from "@/components/Brand";
+import { Wordmark } from "@/components/Brand";
 import { RoomCard } from "@/components/RoomCard";
 import { WalletChip } from "@/components/WalletChip";
 import { feedMode, getFeed, type MatchSummary } from "@/lib/feed";
@@ -45,10 +45,7 @@ export default function Lobby() {
     <main className="mx-auto min-h-dvh w-full max-w-md px-4 pb-16 pt-6">
       <header className="flex items-center justify-between">
         <Wordmark className="text-2xl" />
-        <div className="flex items-center gap-2">
-          <FeedChip mode={mode} />
-          <WalletChip />
-        </div>
+        <WalletChip />
       </header>
 
       <section className="mt-6">

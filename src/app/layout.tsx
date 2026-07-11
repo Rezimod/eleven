@@ -7,9 +7,9 @@ const sans = Inter({ variable: "--ff-sans", subsets: ["latin"] });
 const display = Anton({ variable: "--ff-display", weight: "400", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "ELEVEN — predict the next goal, settled by TxLINE",
+  title: "ELEVEN — live football betting rooms, demo money",
   description:
-    "Trustless live-football prediction markets on Solana. Play free, no wallet. Settled on-chain from TxLINE's signed Merkle proofs.",
+    "Live-football prediction rooms on demo money. Pick a match, pay the entry, call the game — winner takes the pot, every result independently verifiable.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

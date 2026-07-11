@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useRoom } from "@/lib/room/useRoom";
 import { useOnchainRoom, type OnchainRoomState } from "@/lib/chain/useOnchainRoom";
 import { useWallet } from "@/lib/wallet/useWallet";
-import { fmtSol } from "@/lib/chain/config";
+import { fmtUsd } from "@/lib/chain/config";
 import { TIERS } from "@/components/RoomCard";
 import { WalletChip } from "@/components/WalletChip";
 import { Wordmark, LivePill } from "@/components/Brand";
@@ -13,11 +13,12 @@ import { ScoreHeader } from "@/components/room/ScoreHeader";
 import { PredictionSlip } from "@/components/room/PredictionSlip";
 import { StatsBar } from "@/components/room/StatsBar";
 import { LiveBets } from "@/components/room/LiveBets";
+import { BetSlip } from "@/components/room/BetSlip";
 import { Standings } from "@/components/room/PoolPanel";
 import { WinnerBanner } from "@/components/room/WinnerBanner";
 import { EventTicker } from "@/components/room/EventTicker";
 
-const RAKE_BPS = 500; // 5%, capped at 10% on-chain
+const RAKE_BPS = 500; // 5% house fee, capped at 10% on-chain
 
 /** Copy this room's deep link — the match room is fully addressable by its URL. */
 function ShareButton() {
@@ -52,25 +53,26 @@ function MetaStat({ label, value, accent }: { label: string; value: string; acce
 }
 
 /**
- * The PAID-ONLY entry gate. You cannot enter a room without an on-chain
- * `join_room`/`create_room` transaction moving the buy-in (demo devnet SOL)
- * into the room escrow PDA. Sign in → (auto-)fund → pay → enter.
+ * The PAID-ONLY entry gate — sportsbook style, dollars only. You cannot enter
+ * a room without paying the entry (which, under the hood, is an on-chain
+ * transaction moving the buy-in into the room escrow). Sign in → auto $50
+ * demo → pay → play. No crypto terms in the UI.
  */
 function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) {
   const w = useWallet();
-  const buyInLabel = `${fmtSol(buyIn)} ◎ (demo)`;
+  const buyInLabel = fmtUsd(buyIn);
 
   let body: React.ReactNode;
   switch (chain.status) {
     case "loading":
-      body = <p className="text-sm text-muted">Checking the on-chain room…</p>;
+      body = <p className="text-sm text-muted">Checking the room…</p>;
       break;
     case "signed-out":
       body = (
         <>
           <p className="text-sm text-muted">
-            Email sign-in creates your embedded devnet wallet — no seed phrase. Demo SOL is
-            airdropped automatically; no real money anywhere.
+            Sign in with your email and get <span className="font-semibold text-text">$50.00 demo money</span> to
+            play instantly. Not real funds — ever.
           </p>
           <button
             type="button"
@@ -79,11 +81,11 @@ function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) 
             className="mt-3 w-full rounded-[14px] px-4 py-3 text-[15px] font-bold text-[#0a0d12] transition active:scale-[0.99] disabled:opacity-50"
             style={{ background: "var(--color-lime)" }}
           >
-            Sign in to play
+            Sign in · get $50 demo
           </button>
           {!w.configured && (
             <p className="mt-2 text-xs text-red">
-              Wallet auth is not configured — set <code>NEXT_PUBLIC_PRIVY_APP_ID</code> in{" "}
+              Sign-in is not configured — set <code>NEXT_PUBLIC_PRIVY_APP_ID</code> in{" "}
               <code>.env.local</code> (free app at dashboard.privy.io) and restart.
             </p>
           )}
@@ -93,9 +95,7 @@ function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) 
     case "closed":
       body = (
         <>
-          <p className="text-sm text-muted">
-            Joins close at kickoff (enforced on-chain) and this match is already underway.
-          </p>
+          <p className="text-sm text-muted">Entries close at kickoff and this match is already underway.</p>
           <Link href="/" className="mt-3 block w-full rounded-[14px] bg-panel2 px-4 py-3 text-center text-sm font-bold">
             Pick an upcoming match ›
           </Link>
@@ -106,7 +106,7 @@ function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) 
       body = (
         <>
           <p className="text-sm text-muted">
-            Not enough demo SOL for the {buyInLabel} buy-in — top up with a devnet airdrop.
+            Not enough demo money for the {buyInLabel} entry — top up free.
           </p>
           <button
             type="button"
@@ -115,7 +115,7 @@ function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) 
             className="mt-3 w-full rounded-[14px] px-4 py-3 text-[15px] font-bold text-[#0a0d12] transition active:scale-[0.99] disabled:opacity-60"
             style={{ background: "var(--color-lime)" }}
           >
-            {w.funding ? "Airdropping demo SOL…" : "Top up demo SOL (free)"}
+            {w.funding ? "Topping up…" : "Top up to $50"}
           </button>
         </>
       );
@@ -128,17 +128,17 @@ function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) 
           disabled
           className="w-full rounded-[14px] bg-panel2 px-4 py-3 text-[15px] font-bold text-muted"
         >
-          {chain.status === "approving" ? "Approve in your wallet…" : "Paying buy-in into escrow…"}
+          {chain.status === "approving" ? "Confirm to place your entry…" : "Placing your entry…"}
         </button>
       );
       break;
     default:
       body = (
         <>
-          {/* payment methods: demo crypto is live; fiat is display-only */}
+          {/* payment methods: demo balance is live; fiat is display-only */}
           <div className="mb-3 flex flex-col gap-1.5">
             <div className="flex items-center justify-between rounded-[12px] bg-panel2 px-3 py-2 ring-1 ring-[rgba(198,255,58,0.4)]">
-              <span className="text-[13px] font-semibold">◎ Demo SOL — devnet wallet</span>
+              <span className="text-[13px] font-semibold">$ Demo balance</span>
               <span className="pill pill-lime px-2 py-0.5 text-[9px]">SELECTED</span>
             </div>
             <div aria-disabled className="flex items-center justify-between rounded-[12px] bg-panel2 px-3 py-2 opacity-45">
@@ -149,20 +149,20 @@ function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) 
           <button
             type="button"
             onClick={() => chain.join()}
-            className="w-full rounded-[14px] px-4 py-3 text-[15px] font-bold text-[#0a0d12] transition active:scale-[0.99]"
+            className="w-full rounded-[14px] px-4 py-3 text-[16px] font-bold text-[#0a0d12] transition active:scale-[0.99]"
             style={{
               background: "var(--color-lime)",
               boxShadow: "0 0 0 1px rgba(198,255,58,0.35), 0 12px 32px -14px rgba(198,255,58,0.7)",
             }}
           >
-            Join for {buyInLabel}
+            Join {buyInLabel}
           </button>
           <p className="mt-2 text-center text-[11px] text-faint">
             {chain.entryKind === "create"
-              ? "Opens this room on devnet — you're player #1."
-              : `${chain.players} in · pot ${fmtSol(chain.potLamports)} ◎.`}{" "}
-            Your buy-in moves into the room escrow; it leaves only via proof-verified settlement or
-            refund.
+              ? "You're first in — the pot starts with your entry."
+              : `${chain.players} in · pot ${fmtUsd(chain.potLamports)}.`}{" "}
+            Every entry goes straight into the prize pot; payouts are automatic and independently
+            verifiable.
           </p>
         </>
       );
@@ -172,8 +172,8 @@ function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) 
     <div className="card p-4">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <div className="eyebrow text-[9px] text-faint">Buy-in · paid entry only</div>
-          <div className="num text-lg leading-tight text-lime">{buyInLabel}</div>
+          <div className="eyebrow text-[9px] text-faint">Entry</div>
+          <div className="num text-xl font-bold leading-tight text-lime">{buyInLabel}</div>
         </div>
         <WalletChip />
       </div>
@@ -203,10 +203,11 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
   // On-chain truth once a room exists; the local engine only mirrors YOUR scoring.
   const players = Math.max(chain.players, joined ? 1 : 0);
   const pot = chain.potLamports;
+  const secsToKickoff = Math.max(0, Math.ceil((room.kickoffAt - Date.now()) / 1000));
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-4 pb-16">
-      {/* ── sticky compact header: score + clock + phase ─────────────────── */}
+    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-4 pb-28">
+      {/* ── sticky live scoreboard header ─────────────────────────────────── */}
       <div
         className="sticky top-0 z-20 -mx-4 mb-3 border-b border-line px-4 pb-3 pt-4"
         style={{ background: "rgba(10,13,18,0.82)", backdropFilter: "blur(12px)" }}
@@ -216,10 +217,10 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
             <Wordmark className="text-lg" />
           </Link>
           <div className="flex items-center gap-2">
-            {competition && <span className="hidden text-[11px] text-faint sm:inline">{competition}</span>}
             {room.isReplay && <span className="pill px-2 py-0.5 text-[10px] text-faint">REPLAY</span>}
             {room.clock.running && <LivePill minute={room.clock.minute} />}
             <ShareButton />
+            <WalletChip />
           </div>
         </header>
 
@@ -246,13 +247,13 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
             );
           })}
           <span className="ml-auto text-faint">
-            {gamePhase === "lobby" ? "pre-match bets" : gamePhase === "live" ? "live waves" : "settling"}
+            {gamePhase === "lobby" ? "pre-match bets open" : gamePhase === "live" ? "live bets" : "settling"}
           </span>
         </div>
       </div>
 
       {!joined ? (
-        /* ── NOT PAID IN: the only way through is the on-chain buy-in ─────── */
+        /* ── NOT PAID IN: the only way through is the entry payment ────────── */
         <div className="flex flex-col gap-3">
           <JoinGate chain={chain} buyIn={buyIn} />
           {room.phase !== "ended" && <StatsBar home={homeShort || home} away={awayShort || away} stats={room.stats} />}
@@ -260,36 +261,53 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          {/* slim standings strip (pot lives here) */}
+          {/* leaderboard strip (pot lives here) */}
           <Standings standings={room.standings} pot={pot} />
 
           {/* slim meta line */}
           <div className="card flex items-center justify-between gap-2 px-3 py-2">
-            <MetaStat label="Buy-in" value={`${fmtSol(buyIn)} ◎`} />
+            <MetaStat label="Entry" value={fmtUsd(buyIn)} />
             <div className="h-6 w-px bg-line" />
             <MetaStat label="Players" value={String(players)} />
             <div className="h-6 w-px bg-line" />
-            <MetaStat label="Your score" value={String(room.yourPoints)} accent />
+            <MetaStat label="Your points" value={String(room.yourPoints)} accent />
             <div className="h-6 w-px bg-line" />
-            <MetaStat label="Rake" value={`${RAKE_BPS / 100}%`} />
+            <MetaStat label="Fee" value={`${RAKE_BPS / 100}%`} />
           </div>
 
           {room.phase === "ended" && (
             <WinnerBanner winners={room.winners} payouts={room.payouts} rake={room.rake} />
           )}
 
-          {/* pre-match markets — compact rows (resolved rows keep their receipts) */}
+          {/* pre-match markets — sportsbook odds rows (resolved rows keep receipts) */}
           {room.ready && (
             <PredictionSlip markets={room.markets} phase={room.phase} lockAt={room.lockAt} onPredict={room.predict} />
           )}
 
-          {/* live-wave markets — one-tap picks; your score moves live */}
+          {/* live markets: open rows during play, an "opens at kickoff" note before */}
+          {room.phase === "commit" && (
+            <div className="card flex items-center justify-between px-3 py-2.5">
+              <span className="text-[13px] font-semibold text-muted">Live bets</span>
+              <span className="pill px-2 py-0.5 text-[10px] text-faint">
+                {secsToKickoff > 0 ? (
+                  <>
+                    opens at kickoff · <span className="num">{Math.floor(secsToKickoff / 60)}m {secsToKickoff % 60}s</span>
+                  </>
+                ) : (
+                  "opens at kickoff"
+                )}
+              </span>
+            </div>
+          )}
           {room.phase !== "ended" && <LiveBets markets={room.liveMarkets} onPredict={room.predict} />}
 
           {/* context stats — display only, below the actionable markets */}
           {room.phase !== "ended" && <StatsBar home={homeShort || home} away={awayShort || away} stats={room.stats} />}
 
           <EventTicker events={room.events} />
+
+          {/* docked sportsbook bet slip — your picks + totals */}
+          <BetSlip markets={room.markets} liveMarkets={room.liveMarkets} />
         </div>
       )}
     </main>

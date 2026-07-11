@@ -165,6 +165,15 @@ export function marketPoints(yesProb: number): { yesPoints: number; noPoints: nu
   return { yesPoints: pointsFromOdds(yesProb), noPoints: pointsFromOdds(1 - yesProb) };
 }
 
+/**
+ * The decimal odds a points value represents (points = BASE_POINTS × odds), for
+ * sportsbook-style display: 100 pts → 2.00, 75 pts → 1.50. Display only —
+ * scoring always reads the frozen integer points, never this.
+ */
+export function decimalOdds(points: number): number {
+  return points / BASE_POINTS;
+}
+
 // ── room lifecycle (pure, immutable) ─────────────────────────────────────────
 
 export function createRoom(cfg: RoomConfig): Room {
