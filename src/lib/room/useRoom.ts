@@ -5,7 +5,6 @@ import { useEffect, useMemo, useReducer } from "react";
 import {
   addMarket,
   createRoom,
-  joinRoom,
   predict as corePredict,
   resolveMarket,
   settle,
@@ -29,7 +28,6 @@ import {
 } from "@/lib/eleven";
 import { feedMode, getFeed, type MatchClock, type MatchEvent, type Score } from "@/lib/feed";
 import { mockSettleArgs, settleArgsToReceiptProof, type ReceiptProof } from "@/lib/txline";
-import { BOTS, botPick, isBot } from "./bots";
 
 const YOU = "You";
 // Pre-match markets lock this many seconds BEFORE the real kickoff — never a fixed
@@ -136,6 +134,7 @@ interface State {
   clock: MatchClock;
   events: MatchEvent[];
   lockTs: number; // seconds
+  kickoffTs: number; // seconds — real kickoff, drives the on-chain join deadline
   defs: MarketDef[];
   liveDefs: GeneratedMarket[]; // live-wave markets added to the room as play unfolds
   stats: FixtureStats;
@@ -148,7 +147,6 @@ interface State {
 type Action =
   | { type: "INIT"; home: string; away: string; homeShort: string; awayShort: string; competition: string; status: "live" | "upcoming" | "final"; now: number; kickoffTs: number; buyIn: number; rakeBps: number }
   | { type: "PREDICT"; marketId: string; side: Side; now: number }
-  | { type: "LOCK_BOTS"; now: number }
   | { type: "EVENT"; e: MatchEvent; stats: FixtureStats; opened: GeneratedMarket[]; nowSec: number };
 
 function initial(fixtureId: number, roomId: string): State {
@@ -165,6 +163,7 @@ function initial(fixtureId: number, roomId: string): State {
     clock: { minute: 0, period: "PRE", running: false },
     events: [],
     lockTs: 0,
+    kickoffTs: 0,
     defs: [],
     liveDefs: [],
     stats: emptyStats(),
@@ -173,19 +172,6 @@ function initial(fixtureId: number, roomId: string): State {
     ended: false,
     ready: false,
   };
-}
-
-/** Bots place their (odds-weighted) pick on a market that's open for commit. */
-function botsPick(room: Room, roomId: string, spec: MarketSpec, nowSec: number): Room {
-  let r = room;
-  for (const b of BOTS) {
-    try {
-      r = corePredict(r, b, spec.id, botPick(roomId, spec.id, b, spec.yesPoints, spec.noPoints), nowSec);
-    } catch {
-      /* already picked / locked — skip */
-    }
-  }
-  return r;
 }
 
 /** Resolve a pre-match market from the current feed-derived stats. */
@@ -238,7 +224,10 @@ function reducer(state: State, a: Action): State {
       const lockTs = kickoffSec - PRE_MATCH_LOCK_LEAD_SEC;
       const endTs = kickoffSec + 60 * 60;
       const defs = buildMarkets(state.fixtureId, a.home, a.away, lockTs, endTs);
-      let room = createRoom({
+      // The local room mirrors YOUR scoring only — real opponents pay their
+      // buy-in on-chain (join_room) and their sealed picks live in their own
+      // commit-reveal PDAs, invisible here until reveal. No free/bot entries.
+      const room = createRoom({
         id: state.roomId,
         fixtureId: state.fixtureId,
         creator: YOU,
@@ -250,11 +239,7 @@ function reducer(state: State, a: Action): State {
         refundDeadline: endTs + 3600,
         markets: defs.map((d) => d.spec),
       });
-      // Two free-play bot opponents join the room (points only, no escrow). Seed them
-      // just inside the join window so it works even when kickoff is already past.
-      const joinAt = lockTs - 1;
-      for (const b of BOTS) room = joinRoom(room, b, joinAt);
-      return { ...state, home: a.home, away: a.away, homeShort: a.homeShort, awayShort: a.awayShort, competition: a.competition, status: a.status, lockTs, defs, room, ready: true };
+      return { ...state, home: a.home, away: a.away, homeShort: a.homeShort, awayShort: a.awayShort, competition: a.competition, status: a.status, lockTs, kickoffTs: kickoffSec, defs, room, ready: true };
     }
     case "PREDICT": {
       if (!state.room) return state;
@@ -271,13 +256,6 @@ function reducer(state: State, a: Action): State {
       }
       return { ...state, room, yourPicks: { ...state.yourPicks, [a.marketId]: a.side } };
     }
-    case "LOCK_BOTS": {
-      if (!state.room) return state;
-      let room = state.room;
-      const t = Math.floor(a.now / 1000) - 1; // land inside the pre-match lock window
-      for (const d of state.defs) room = botsPick(room, state.roomId, d.spec, t);
-      return { ...state, room };
-    }
     case "EVENT": {
       const e = a.e;
       const fulltime = e.kind === "fulltime";
@@ -292,13 +270,12 @@ function reducer(state: State, a: Action): State {
       if (!s.room) return s;
       let room = s.room;
 
-      // 1) Newly-opened live markets: add to the room, bots pick immediately (in-window).
+      // 1) Newly-opened live markets: add to the room.
       let liveDefs = s.liveDefs;
       if (a.opened.length) {
         liveDefs = [...liveDefs];
         for (const gm of a.opened) {
           room = addMarket(room, gm.spec);
-          room = botsPick(room, s.roomId, gm.spec, a.nowSec);
           liveDefs.push(gm);
         }
       }
@@ -366,6 +343,7 @@ export interface RoomView {
   stats: FixtureStats;
   phase: "commit" | "live" | "ended";
   lockAt: number; // ms
+  kickoffAt: number; // ms — real kickoff; on-chain joins close here
   markets: MarketView[];
   liveMarkets: LiveMarketView[];
   yourPoints: number;
@@ -425,14 +403,6 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
     };
   }, [fixtureId, buyIn, rakeBps]);
 
-  // Lock bot pre-match predictions when the commit window closes.
-  useEffect(() => {
-    if (!state.ready) return;
-    const ms = Math.max(0, state.lockTs * 1000 - Date.now());
-    const t = setTimeout(() => dispatch({ type: "LOCK_BOTS", now: Date.now() }), ms);
-    return () => clearTimeout(t);
-  }, [state.ready, state.lockTs]);
-
   return useMemo<RoomView>(() => {
     const room = state.room;
     const lockAt = state.lockTs * 1000;
@@ -488,7 +458,7 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
     });
 
     const standings: StandingView[] = room
-      ? coreStandings(room).map((s) => ({ ...s, isYou: s.player === YOU, isBot: isBot(s.player) }))
+      ? coreStandings(room).map((s) => ({ ...s, isYou: s.player === YOU, isBot: false }))
       : [];
     const result = room && state.ended ? settle(room) : null;
 
@@ -503,6 +473,7 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
       stats: state.stats,
       phase,
       lockAt,
+      kickoffAt: state.kickoffTs * 1000,
       markets,
       liveMarkets,
       yourPoints: room ? playerPoints(room, YOU) : 0,

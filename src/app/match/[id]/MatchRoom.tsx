@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRoom } from "@/lib/room/useRoom";
+import { useOnchainRoom, type OnchainRoomState } from "@/lib/chain/useOnchainRoom";
+import { useWallet } from "@/lib/wallet/useWallet";
+import { fmtSol } from "@/lib/chain/config";
 import { TIERS } from "@/components/RoomCard";
+import { WalletChip } from "@/components/WalletChip";
 import { Wordmark, LivePill } from "@/components/Brand";
 import { ScoreHeader } from "@/components/room/ScoreHeader";
 import { PredictionSlip } from "@/components/room/PredictionSlip";
@@ -47,9 +51,132 @@ function MetaStat({ label, value, accent }: { label: string; value: string; acce
   );
 }
 
+/**
+ * The PAID-ONLY entry gate. You cannot enter a room without an on-chain
+ * `join_room`/`create_room` transaction moving the buy-in (demo devnet SOL)
+ * into the room escrow PDA. Sign in → (auto-)fund → pay → enter.
+ */
+function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) {
+  const w = useWallet();
+  const buyInLabel = `${fmtSol(buyIn)} ◎ (demo)`;
+
+  let body: React.ReactNode;
+  switch (chain.status) {
+    case "loading":
+      body = <p className="text-sm text-muted">Checking the on-chain room…</p>;
+      break;
+    case "signed-out":
+      body = (
+        <>
+          <p className="text-sm text-muted">
+            Email sign-in creates your embedded devnet wallet — no seed phrase. Demo SOL is
+            airdropped automatically; no real money anywhere.
+          </p>
+          <button
+            type="button"
+            onClick={w.signIn}
+            disabled={!w.ready}
+            className="mt-3 w-full rounded-[14px] px-4 py-3 text-[15px] font-bold text-[#0a0d12] transition active:scale-[0.99] disabled:opacity-50"
+            style={{ background: "var(--color-lime)" }}
+          >
+            Sign in to play
+          </button>
+          {!w.configured && (
+            <p className="mt-2 text-xs text-red">
+              Wallet auth is not configured — set <code>NEXT_PUBLIC_PRIVY_APP_ID</code> in{" "}
+              <code>.env.local</code> (free app at dashboard.privy.io) and restart.
+            </p>
+          )}
+        </>
+      );
+      break;
+    case "closed":
+      body = (
+        <>
+          <p className="text-sm text-muted">
+            Joins close at kickoff (enforced on-chain) and this match is already underway.
+          </p>
+          <Link href="/" className="mt-3 block w-full rounded-[14px] bg-panel2 px-4 py-3 text-center text-sm font-bold">
+            Pick an upcoming match ›
+          </Link>
+        </>
+      );
+      break;
+    case "short":
+      body = (
+        <>
+          <p className="text-sm text-muted">
+            Not enough demo SOL for the {buyInLabel} buy-in — top up with a devnet airdrop.
+          </p>
+          <button
+            type="button"
+            onClick={() => w.topUp().catch(() => {})}
+            disabled={w.funding}
+            className="mt-3 w-full rounded-[14px] px-4 py-3 text-[15px] font-bold text-[#0a0d12] transition active:scale-[0.99] disabled:opacity-60"
+            style={{ background: "var(--color-lime)" }}
+          >
+            {w.funding ? "Airdropping demo SOL…" : "Top up demo SOL (free)"}
+          </button>
+        </>
+      );
+      break;
+    case "approving":
+    case "confirming":
+      body = (
+        <button
+          type="button"
+          disabled
+          className="w-full rounded-[14px] bg-panel2 px-4 py-3 text-[15px] font-bold text-muted"
+        >
+          {chain.status === "approving" ? "Approve in your wallet…" : "Paying buy-in into escrow…"}
+        </button>
+      );
+      break;
+    default:
+      body = (
+        <>
+          <button
+            type="button"
+            onClick={() => chain.join()}
+            className="w-full rounded-[14px] px-4 py-3 text-[15px] font-bold text-[#0a0d12] transition active:scale-[0.99]"
+            style={{
+              background: "var(--color-lime)",
+              boxShadow: "0 0 0 1px rgba(198,255,58,0.35), 0 12px 32px -14px rgba(198,255,58,0.7)",
+            }}
+          >
+            Join for {buyInLabel}
+          </button>
+          <p className="mt-2 text-center text-[11px] text-faint">
+            {chain.entryKind === "create"
+              ? "Opens this room on devnet — you're player #1."
+              : `${chain.players} in · pot ${fmtSol(chain.potLamports)} ◎.`}{" "}
+            Your buy-in moves into the room escrow; it leaves only via proof-verified settlement or
+            refund.
+          </p>
+        </>
+      );
+  }
+
+  return (
+    <div className="card p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <div className="eyebrow text-[9px] text-faint">Buy-in · paid entry only</div>
+          <div className="num text-lg leading-tight text-lime">{buyInLabel}</div>
+        </div>
+        <WalletChip />
+      </div>
+      {body}
+      {chain.error && <p className="mt-2 text-xs text-red">{chain.error}</p>}
+    </div>
+  );
+}
+
 export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string }) {
   const buyIn = (TIERS.find((t) => t.key === tier) ?? TIERS[0]).buyIn;
   const room = useRoom(fixtureId, `${fixtureId}-${tier}`, buyIn, RAKE_BPS);
+  const chain = useOnchainRoom(fixtureId, buyIn, room.ready ? room.kickoffAt : null);
+  const joined = chain.status === "joined";
 
   // Local tick so the per-row lock countdowns update without feed events.
   const [, setTick] = useState(0);
@@ -62,7 +189,9 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
   const { home, away, homeShort, awayShort, competition } = room.match;
   // Room state machine: Lobby (pre-match) → Live → FullTime.
   const gamePhase = room.phase === "ended" ? "fulltime" : room.phase === "commit" ? "lobby" : "live";
-  const free = buyIn === 0;
+  // On-chain truth once a room exists; the local engine only mirrors YOUR scoring.
+  const players = Math.max(chain.players, joined ? 1 : 0);
+  const pot = chain.potLamports;
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-4 pb-16">
@@ -111,38 +240,47 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
         </div>
       </div>
 
-      <div className="flex flex-col gap-3">
-        {/* slim standings strip (pot lives here) */}
-        <Standings standings={room.standings} pot={room.pot} />
-
-        {/* slim meta line */}
-        <div className="card flex items-center justify-between gap-2 px-3 py-2">
-          <MetaStat label="Buy-in" value={free ? "FREE" : `${(buyIn / 1e9).toFixed(2)} ◎`} />
-          <div className="h-6 w-px bg-line" />
-          <MetaStat label="Players" value={String(room.players)} />
-          <div className="h-6 w-px bg-line" />
-          <MetaStat label="Your score" value={String(room.yourPoints)} accent />
-          <div className="h-6 w-px bg-line" />
-          <MetaStat label="Rake" value={`${RAKE_BPS / 100}%`} />
+      {!joined ? (
+        /* ── NOT PAID IN: the only way through is the on-chain buy-in ─────── */
+        <div className="flex flex-col gap-3">
+          <JoinGate chain={chain} buyIn={buyIn} />
+          {room.phase !== "ended" && <StatsBar home={homeShort || home} away={awayShort || away} stats={room.stats} />}
+          <EventTicker events={room.events} />
         </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {/* slim standings strip (pot lives here) */}
+          <Standings standings={room.standings} pot={pot} />
 
-        {room.phase === "ended" && (
-          <WinnerBanner winners={room.winners} payouts={room.payouts} buyIn={buyIn} rake={room.rake} />
-        )}
+          {/* slim meta line */}
+          <div className="card flex items-center justify-between gap-2 px-3 py-2">
+            <MetaStat label="Buy-in" value={`${fmtSol(buyIn)} ◎`} />
+            <div className="h-6 w-px bg-line" />
+            <MetaStat label="Players" value={String(players)} />
+            <div className="h-6 w-px bg-line" />
+            <MetaStat label="Your score" value={String(room.yourPoints)} accent />
+            <div className="h-6 w-px bg-line" />
+            <MetaStat label="Rake" value={`${RAKE_BPS / 100}%`} />
+          </div>
 
-        {/* pre-match markets — compact rows (resolved rows keep their receipts) */}
-        {room.ready && (
-          <PredictionSlip markets={room.markets} phase={room.phase} lockAt={room.lockAt} onPredict={room.predict} />
-        )}
+          {room.phase === "ended" && (
+            <WinnerBanner winners={room.winners} payouts={room.payouts} buyIn={buyIn} rake={room.rake} />
+          )}
 
-        {/* live-wave markets — one-tap free-play picks; you + bots score live */}
-        {room.phase !== "ended" && <LiveBets markets={room.liveMarkets} onPredict={room.predict} />}
+          {/* pre-match markets — compact rows (resolved rows keep their receipts) */}
+          {room.ready && (
+            <PredictionSlip markets={room.markets} phase={room.phase} lockAt={room.lockAt} onPredict={room.predict} />
+          )}
 
-        {/* context stats — display only, below the actionable markets */}
-        {room.phase !== "ended" && <StatsBar home={homeShort || home} away={awayShort || away} stats={room.stats} />}
+          {/* live-wave markets — one-tap picks; your score moves live */}
+          {room.phase !== "ended" && <LiveBets markets={room.liveMarkets} onPredict={room.predict} />}
 
-        <EventTicker events={room.events} />
-      </div>
+          {/* context stats — display only, below the actionable markets */}
+          {room.phase !== "ended" && <StatsBar home={homeShort || home} away={awayShort || away} stats={room.stats} />}
+
+          <EventTicker events={room.events} />
+        </div>
+      )}
     </main>
   );
 }

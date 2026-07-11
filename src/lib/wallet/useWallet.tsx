@@ -1,60 +1,209 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
+import { useSignAndSendTransaction, useWallets } from "@privy-io/react-auth/solana";
+import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
+import { utils } from "@coral-xyz/anchor";
+import type { Transaction } from "@solana/web3.js";
+
+import { LAMPORTS_PER_SOL, RPC_URL, SOLANA_CHAIN, WS_URL, getConnection } from "@/lib/chain/config";
 
 /**
- * Wallet abstraction for the SECONDARY "Play with USDC" path. Free play never
- * touches this. Ships with a demo stub so the app builds and runs with zero env;
- * plugging Privy is a drop-in (see TODO in `connect`).
+ * Real wallet auth via Privy: email sign-in → embedded Solana wallet on DEVNET,
+ * no seed phrase. All funds are DEMO devnet SOL (airdropped) — never mainnet,
+ * never real money (the chain id + RPC are pinned to devnet in lib/chain/config).
  */
+
+export const PRIVY_SETUP_HINT =
+  "Set NEXT_PUBLIC_PRIVY_APP_ID=<your Privy app id> in .env.local — create a free app at " +
+  "https://dashboard.privy.io (enable Email login + Solana embedded wallets), then restart `npm run dev`.";
+
+/** Auto-top-up trigger: below this, a fresh sign-in gets demo SOL airdropped. */
+const AUTO_FUND_BELOW_LAMPORTS = 0.05 * LAMPORTS_PER_SOL;
+
 export interface WalletState {
-  connected: boolean;
-  connecting: boolean;
+  /** False until NEXT_PUBLIC_PRIVY_APP_ID is set — sign-in is unavailable. */
+  configured: boolean;
+  ready: boolean;
+  signedIn: boolean;
   address: string | null;
-  /** True once NEXT_PUBLIC_PRIVY_APP_ID is configured. */
-  privyConfigured: boolean;
-  connect: () => Promise<void>;
-  disconnect: () => void;
+  /** DEMO devnet SOL balance; null while loading. */
+  balanceLamports: number | null;
+  /** Demo airdrop in flight. */
+  funding: boolean;
+  signIn: () => void;
+  signOut: () => void;
+  /** One-tap demo top-up: airdrops devnet SOL to the embedded wallet. */
+  topUp: () => Promise<void>;
+  refreshBalance: () => Promise<void>;
+  /** Sign + send a devnet transaction with the embedded wallet; resolves to the confirmed signature. */
+  sendTx: (tx: Transaction) => Promise<string>;
 }
 
 const WalletContext = createContext<WalletState | null>(null);
 
-function shortDemoAddress(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz123456789";
-  let s = "";
-  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return `Demo${s}…${s.slice(0, 3)}`;
+async function requestDemoAirdrop(address: string): Promise<void> {
+  const r = await fetch("/api/demo/airdrop", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ address }),
+  });
+  if (!r.ok) throw new Error((await r.text()) || `airdrop failed (HTTP ${r.status})`);
 }
 
-export function WalletProvider({ children }: { children: React.ReactNode }) {
-  const privyConfigured = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
-  const [connected, setConnected] = useState(false);
-  const [connecting, setConnecting] = useState(false);
-  const [address, setAddress] = useState<string | null>(null);
+function InnerWalletProvider({ children }: { children: React.ReactNode }) {
+  const { ready, authenticated, login, logout } = usePrivy();
+  const { wallets } = useWallets();
+  const { signAndSendTransaction } = useSignAndSendTransaction();
 
-  const connect = useCallback(async () => {
-    setConnecting(true);
-    // TODO(privy): when NEXT_PUBLIC_PRIVY_APP_ID is set, dynamically import
-    // `@privy-io/react-auth`, render its provider, and open the login modal here.
-    // The rest of the app only reads `connected`/`address`, so this is the only
-    // file that changes. Until then we use a demo stub wallet.
-    await new Promise((r) => setTimeout(r, 350));
-    setAddress(shortDemoAddress());
-    setConnected(true);
-    setConnecting(false);
-  }, []);
+  const wallet = wallets[0] ?? null;
+  const address = wallet?.address ?? null;
 
-  const disconnect = useCallback(() => {
-    setConnected(false);
-    setAddress(null);
-  }, []);
+  const [balanceLamports, setBalance] = useState<number | null>(null);
+  const [funding, setFunding] = useState(false);
+  const autoFunded = useRef<Set<string>>(new Set());
+
+  const refreshBalance = useCallback(async () => {
+    if (!address) return;
+    try {
+      const { PublicKey } = await import("@solana/web3.js");
+      setBalance(await getConnection().getBalance(new PublicKey(address)));
+    } catch {
+      /* transient RPC failure — keep the last known balance */
+    }
+  }, [address]);
+
+  useEffect(() => {
+    setBalance(null);
+    if (!address) return;
+    refreshBalance();
+    const t = setInterval(refreshBalance, 15_000);
+    return () => clearInterval(t);
+  }, [address, refreshBalance]);
+
+  const topUp = useCallback(async () => {
+    if (!address || funding) return;
+    setFunding(true);
+    try {
+      await requestDemoAirdrop(address);
+      await refreshBalance();
+    } finally {
+      setFunding(false);
+    }
+  }, [address, funding, refreshBalance]);
+
+  // DEMO funding on first sign-in: if the fresh embedded wallet is (near) empty,
+  // airdrop devnet SOL so there's something to play with. Once per address per session.
+  useEffect(() => {
+    if (!authenticated || !address || balanceLamports === null) return;
+    if (balanceLamports >= AUTO_FUND_BELOW_LAMPORTS) return;
+    if (autoFunded.current.has(address)) return;
+    autoFunded.current.add(address);
+    topUp().catch(() => {
+      /* faucet dry — the join gate offers a manual retry */
+    });
+  }, [authenticated, address, balanceLamports, topUp]);
+
+  const sendTx = useCallback(
+    async (tx: Transaction) => {
+      if (!wallet || !address) throw new Error("sign in first");
+      const { PublicKey } = await import("@solana/web3.js");
+      const conn = getConnection();
+      const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
+      tx.feePayer = new PublicKey(address);
+      tx.recentBlockhash = blockhash;
+      const { signature } = await signAndSendTransaction({
+        transaction: new Uint8Array(tx.serialize({ requireAllSignatures: false, verifySignatures: false })),
+        wallet,
+        chain: SOLANA_CHAIN,
+      });
+      const sig = utils.bytes.bs58.encode(signature);
+      const res = await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      if (res.value.err) throw new Error(`transaction failed: ${JSON.stringify(res.value.err)}`);
+      refreshBalance();
+      return sig;
+    },
+    [wallet, address, signAndSendTransaction, refreshBalance],
+  );
 
   const value = useMemo<WalletState>(
-    () => ({ connected, connecting, address, privyConfigured, connect, disconnect }),
-    [connected, connecting, address, privyConfigured, connect, disconnect],
+    () => ({
+      configured: true,
+      ready,
+      signedIn: ready && authenticated && !!address,
+      address,
+      balanceLamports,
+      funding,
+      signIn: login,
+      signOut: logout,
+      topUp,
+      refreshBalance,
+      sendTx,
+    }),
+    [ready, authenticated, address, balanceLamports, funding, login, logout, topUp, refreshBalance, sendTx],
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
+}
+
+/** No-Privy fallback: the app renders, sign-in explains exactly what to set. */
+function UnconfiguredWalletProvider({ children }: { children: React.ReactNode }) {
+  const warned = useRef(false);
+  const signIn = useCallback(() => {
+    console.error(PRIVY_SETUP_HINT);
+    if (typeof window !== "undefined") window.alert(PRIVY_SETUP_HINT);
+  }, []);
+  useEffect(() => {
+    if (!warned.current) {
+      warned.current = true;
+      console.warn(`ELEVEN wallet auth is not configured. ${PRIVY_SETUP_HINT}`);
+    }
+  }, []);
+  const value = useMemo<WalletState>(
+    () => ({
+      configured: false,
+      ready: true,
+      signedIn: false,
+      address: null,
+      balanceLamports: null,
+      funding: false,
+      signIn,
+      signOut: () => {},
+      topUp: async () => {},
+      refreshBalance: async () => {},
+      sendTx: async () => {
+        throw new Error(PRIVY_SETUP_HINT);
+      },
+    }),
+    [signIn],
+  );
+  return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
+}
+
+export function WalletProvider({ children }: { children: React.ReactNode }) {
+  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  if (!appId) return <UnconfiguredWalletProvider>{children}</UnconfiguredWalletProvider>;
+  return (
+    <PrivyProvider
+      appId={appId}
+      config={{
+        loginMethods: ["email"],
+        appearance: { theme: "dark", accentColor: "#c6ff3a", walletChainType: "solana-only" },
+        embeddedWallets: { solana: { createOnLogin: "users-without-wallets" }, showWalletUIs: true },
+        solana: {
+          rpcs: {
+            [SOLANA_CHAIN]: {
+              rpc: createSolanaRpc(RPC_URL),
+              rpcSubscriptions: createSolanaRpcSubscriptions(WS_URL),
+            },
+          },
+        },
+      }}
+    >
+      <InnerWalletProvider>{children}</InnerWalletProvider>
+    </PrivyProvider>
+  );
 }
 
 export function useWallet(): WalletState {

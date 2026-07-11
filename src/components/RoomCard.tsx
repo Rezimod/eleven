@@ -2,8 +2,11 @@ import Link from "next/link";
 import type { MatchSummary } from "@/lib/feed";
 import { LivePill, TeamFlag } from "@/components/Brand";
 
+/**
+ * PAID ONLY — every tier moves a real (demo devnet SOL) buy-in into the room
+ * escrow PDA on join. There is no free entry into a room.
+ */
 export const TIERS = [
-  { key: "free", label: "Free", buyIn: 0 },
   { key: "low", label: "0.05 ◎", buyIn: 50_000_000 },
   { key: "high", label: "0.1 ◎", buyIn: 100_000_000 },
 ] as const;
@@ -37,13 +40,13 @@ export function RoomCard({ m }: { m: MatchSummary }) {
       </div>
 
       <div className="mt-4 flex items-center gap-2">
-        <span className="text-xs text-muted">Join a room</span>
+        <span className="text-xs text-muted">Buy-in (demo ◎)</span>
         <div className="ml-auto flex gap-2">
           {TIERS.map((t) => (
             <Link
               key={t.key}
               href={`/match/${m.fixtureId}?tier=${t.key}`}
-              className={`pill ${t.key === "free" ? "pill-lime" : "text-text"} hover:brightness-110`}
+              className={`pill ${t.key === "low" ? "pill-lime" : "text-text"} hover:brightness-110`}
             >
               {t.label}
             </Link>

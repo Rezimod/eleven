@@ -14,8 +14,8 @@ const STAT_NAME: Record<number, string> = {
  * LiveBets — live-wave markets the generator opened from match pressure, as
  * compact one-tap rows sliding in with their own lock countdown. Each row keeps
  * the WHY (trigger) + WHAT-it-settles-on (a provable stat) visible so the
- * trustless-settlement guarantee stays legible. Picks are free-play and score
- * through the same room engine as pre-match — you + the bots move the standings live.
+ * trustless-settlement guarantee stays legible. Picks score through the same
+ * room engine as pre-match — your score moves the standings live.
  */
 function LiveRow({ m, onPredict }: { m: LiveMarketView; onPredict: (id: string, side: Side) => void }) {
   const secsToLock = Math.max(0, Math.ceil((m.lockTs * 1000 - Date.now()) / 1000));
