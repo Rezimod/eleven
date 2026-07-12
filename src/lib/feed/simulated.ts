@@ -94,6 +94,20 @@ function speed(): number {
   return Number.isFinite(s) && s > 0 ? s : 1;
 }
 
+/** The one fixture that is already LIVE; the rest are upcoming. */
+const LIVE_INDEX = 0;
+
+/**
+ * Wall-clock ms the sim sits PRE-MATCH before kickoff for an UPCOMING fixture, so
+ * pre-match markets get a real kickoff-derived lock window (lock = kickoff − 60s)
+ * to bet into. The live fixture skips this (kickoff = now). Must exceed 60s to leave
+ * an open betting window; tune for recording via NEXT_PUBLIC_SIM_PREMATCH_SEC.
+ */
+function preMatchLeadMs(): number {
+  const s = Number(process.env.NEXT_PUBLIC_SIM_PREMATCH_SEC ?? "120");
+  return (Number.isFinite(s) && s >= 0 ? s : 120) * 1000;
+}
+
 function minuteAt(sec: number): number {
   return Math.min(90, Math.floor((sec / MATCH_SECONDS) * 90));
 }
@@ -113,23 +127,30 @@ export class SimulatedFeed implements MatchFeed {
   }
 
   async listMatches(): Promise<MatchSummary[]> {
-    return MATCHES.map((m, i) => ({
-      fixtureId: m.fixtureId,
-      competition: m.competition,
-      home: m.home,
-      away: m.away,
-      homeShort: m.homeShort,
-      awayShort: m.awayShort,
-      status: i === 0 ? "live" : "upcoming",
-      score: { home: 0, away: 0 },
-      minute: 0,
-      kickoffLabel: i === 0 ? "LIVE" : "Kicks off now",
-    }));
+    const now = Date.now();
+    return MATCHES.map((m, i) => {
+      const isLive = i === LIVE_INDEX;
+      return {
+        fixtureId: m.fixtureId,
+        competition: m.competition,
+        home: m.home,
+        away: m.away,
+        homeShort: m.homeShort,
+        awayShort: m.awayShort,
+        status: isLive ? "live" : "upcoming",
+        score: { home: 0, away: 0 },
+        minute: 0,
+        kickoffTs: isLive ? now : now + preMatchLeadMs(),
+        kickoffLabel: isLive ? "LIVE" : "Kicks off soon",
+      };
+    });
   }
 
   async getMatch(fixtureId: number): Promise<MatchSummary | null> {
     const m = this.match(fixtureId);
     if (!m) return null;
+    const isLive = MATCHES.indexOf(m) === LIVE_INDEX;
+    const now = Date.now();
     return {
       fixtureId: m.fixtureId,
       competition: m.competition,
@@ -137,10 +158,13 @@ export class SimulatedFeed implements MatchFeed {
       away: m.away,
       homeShort: m.homeShort,
       awayShort: m.awayShort,
-      status: "live",
+      status: isLive ? "live" : "upcoming",
       score: { home: 0, away: 0 },
       minute: 0,
-      kickoffLabel: "LIVE",
+      // Live fixture kicks off now; upcoming fixtures kick off after the pre-match lead
+      // so their pre-match markets stay open (lock = kickoff − 60s, derived in useRoom).
+      kickoffTs: isLive ? now : now + preMatchLeadMs(),
+      kickoffLabel: isLive ? "LIVE" : "Kicks off soon",
     };
   }
 
@@ -149,6 +173,9 @@ export class SimulatedFeed implements MatchFeed {
     const m = this.match(fixtureId);
     if (!m) return () => {};
 
+    // Upcoming fixtures stay in the lobby for the pre-match lead, THEN kick off — so
+    // pre-match stays bettable until its real lock and LIVE markets open at kickoff.
+    const lead = MATCHES.indexOf(m) === LIVE_INDEX ? 0 : preMatchLeadMs();
     const factor = 1 / speed();
     const score: Score = { home: 0, away: 0 };
     let seq = 0;
@@ -192,55 +219,63 @@ export class SimulatedFeed implements MatchFeed {
       });
     };
 
-    // Kickoff immediately.
-    emit("kickoff", 0);
+    let interval: ReturnType<typeof setInterval> | undefined;
 
-    // Clock tick every match-second (scaled by speed).
-    const start = Date.now();
-    const interval = setInterval(() => {
-      const elapsed = Math.round((Date.now() - start) / (1000 * factor));
-      if (elapsed > MATCH_SECONDS) return;
-      // Momentum decays toward neutral between events; open play adds attacks.
-      stats.momentum = Math.trunc(stats.momentum * 0.9);
-      stats.attacks += 1;
-      stats.possessionHome = clamp(50 + Math.round(stats.momentum / 4), 5, 95);
-      emit("clock", Math.min(elapsed, MATCH_SECONDS));
-    }, 1000 * factor);
+    // Run the scripted match: kickoff, then the clock tick + timeline. Deferred by
+    // `lead` for upcoming fixtures so the lobby (pre-match betting) plays out first.
+    const runMatch = () => {
+      emit("kickoff", 0);
 
-    for (const step of SCRIPT) {
-      const timer = setTimeout(() => {
-        if (step.kind === "goal" && step.team) {
-          score[step.team] += 1;
-          const scorers = step.team === "home" ? m.homeScorers : m.awayScorers;
-          const scorer = scorers[goalCount % scorers.length] ?? "Unknown";
-          goalCount += 1;
-          stats.shots += 2;
-          stats.shotsOnTarget += 2; // SoT spike → the "goal in next N" template
-          stats.dangerousAttacks += 2;
-          nudge(step.team, 25);
-          emit("goal", step.t, { team: step.team, goalType: step.goalType, scorer });
-        } else if (step.kind === "fulltime") {
-          emit("fulltime", step.t);
-          clearInterval(interval);
-        } else if (step.kind === "corner") {
-          stats.shots += 1;
-          stats.attacks += 3;
-          stats.dangerousAttacks += 2; // pressure signal
-          nudge(step.team, 14);
-          emit(step.kind, step.t, { team: step.team });
-        } else if (step.kind === "card") {
-          stats.dangerousAttacks += 1;
-          nudge(step.team === "home" ? "away" : "home", 10); // tilts to the other side
-          emit(step.kind, step.t, { team: step.team, card: step.card });
-        } else {
-          emit(step.kind, step.t, { team: step.team, card: step.card });
-        }
-      }, step.t * 1000 * factor);
-      timers.push(timer);
-    }
+      // Clock tick every match-second (scaled by speed).
+      const start = Date.now();
+      interval = setInterval(() => {
+        const elapsed = Math.round((Date.now() - start) / (1000 * factor));
+        if (elapsed > MATCH_SECONDS) return;
+        // Momentum decays toward neutral between events; open play adds attacks.
+        stats.momentum = Math.trunc(stats.momentum * 0.9);
+        stats.attacks += 1;
+        stats.possessionHome = clamp(50 + Math.round(stats.momentum / 4), 5, 95);
+        emit("clock", Math.min(elapsed, MATCH_SECONDS));
+      }, 1000 * factor);
+
+      for (const step of SCRIPT) {
+        const timer = setTimeout(() => {
+          if (step.kind === "goal" && step.team) {
+            score[step.team] += 1;
+            const scorers = step.team === "home" ? m.homeScorers : m.awayScorers;
+            const scorer = scorers[goalCount % scorers.length] ?? "Unknown";
+            goalCount += 1;
+            stats.shots += 2;
+            stats.shotsOnTarget += 2; // SoT spike → the "goal in next N" template
+            stats.dangerousAttacks += 2;
+            nudge(step.team, 25);
+            emit("goal", step.t, { team: step.team, goalType: step.goalType, scorer });
+          } else if (step.kind === "fulltime") {
+            emit("fulltime", step.t);
+            if (interval) clearInterval(interval);
+          } else if (step.kind === "corner") {
+            stats.shots += 1;
+            stats.attacks += 3;
+            stats.dangerousAttacks += 2; // pressure signal
+            nudge(step.team, 14);
+            emit(step.kind, step.t, { team: step.team });
+          } else if (step.kind === "card") {
+            stats.dangerousAttacks += 1;
+            nudge(step.team === "home" ? "away" : "home", 10); // tilts to the other side
+            emit(step.kind, step.t, { team: step.team, card: step.card });
+          } else {
+            emit(step.kind, step.t, { team: step.team, card: step.card });
+          }
+        }, step.t * 1000 * factor);
+        timers.push(timer);
+      }
+    };
+
+    const kickoffTimer = setTimeout(runMatch, lead);
 
     return () => {
-      clearInterval(interval);
+      clearTimeout(kickoffTimer);
+      if (interval) clearInterval(interval);
       timers.forEach(clearTimeout);
     };
   }

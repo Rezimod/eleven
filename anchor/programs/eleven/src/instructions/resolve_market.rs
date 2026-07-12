@@ -74,7 +74,7 @@ pub fn handle_resolve_market<'info>(
     let idx = args.market_index as usize;
 
     // Snapshot the fields we need before taking a &mut on the room.
-    let (reveal_count, resolved, resolve_deadline, yes_points, no_points, predicate) = {
+    let (reveal_count, resolved, resolve_deadline, predicate) = {
         let market = ctx
             .accounts
             .room
@@ -85,8 +85,6 @@ pub fn handle_resolve_market<'info>(
             market.reveal_count,
             market.resolved,
             market.resolve_deadline_ts,
-            market.yes_points,
-            market.no_points,
             predicate_of(market),
         )
     };
@@ -127,7 +125,6 @@ pub fn handle_resolve_market<'info>(
         ElevenError::AccountCountMismatch,
     );
     let room_key = ctx.accounts.room.key();
-    let award = if outcome { yes_points } else { no_points } as u64;
     let win_side: u8 = if outcome { 1 } else { 0 };
 
     let mut prev: Option<Pubkey> = None;
@@ -160,9 +157,12 @@ pub fn handle_resolve_market<'info>(
         }
         prev = Some(pred.owner);
 
-        if pred.side == win_side {
-            part.points = part.points.checked_add(award).ok_or(ElevenError::MathOverflow)?;
-        }
+        // FROZEN, capped snapshot from reveal — never recomputed here. Correct
+        // adds the award; wrong costs the small anti-drain penalty.
+        part.points = part
+            .points
+            .checked_add(score_delta(pred.award_points, pred.side == win_side))
+            .ok_or(ElevenError::MathOverflow)?;
         pred.scored = true;
         pred.exit(ctx.program_id)?;
         part.exit(ctx.program_id)?;

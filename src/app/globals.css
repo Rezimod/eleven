@@ -142,12 +142,36 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
+@keyframes tappop {
+  0% { transform: scale(1); }
+  40% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+@keyframes rowin {
+  0% { transform: translateY(-8px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+@keyframes undobar {
+  0% { width: 100%; }
+  100% { width: 0%; }
+}
 
 .animate-goalflash { animation: goalflash 1100ms ease-out; }
 .animate-scorebump { animation: scorebump 520ms cubic-bezier(0.2, 0.9, 0.3, 1.4); }
 .animate-popin { animation: popin 240ms cubic-bezier(0.2, 0.9, 0.3, 1.2); }
 .animate-tickerin { animation: tickerin 200ms ease-out; }
+.animate-rowin { animation: rowin 240ms cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+.animate-tappop { animation: tappop 220ms ease-out; }
 .livedot { animation: livepulse 1.4s ease-in-out infinite; }
+
+/* Undo grace countdown bar — the 3s window before a pick commits. */
+.undo-bar { animation: undobar 3000ms linear forwards; }
+
+/* Under reduced motion the bar must still shrink so the affordance is truthful;
+   the global rule below zeroes durations, so give it back just for this element. */
+@media (prefers-reduced-motion: reduce) {
+  .undo-bar { animation-duration: 3000ms !important; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

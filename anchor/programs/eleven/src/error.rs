@@ -37,6 +37,24 @@ pub enum ElevenError {
     BadReveal,
     #[msg("Invalid prediction side (must be 0 or 1)")]
     BadSide,
+    #[msg("A pre-match market must lock exactly at kickoff")]
+    PreMatchLockNotKickoff,
+    #[msg("Expected a live-wave market")]
+    NotLiveMarket,
+    #[msg("Expected a pre-match market")]
+    NotPreMatchMarket,
+    #[msg("Live wave root already committed")]
+    RootAlreadyCommitted,
+    #[msg("Live wave root not committed")]
+    RootNotCommitted,
+    #[msg("Live pick does not verify against the committed Merkle root")]
+    BadMerkleProof,
+    #[msg("Frozen points exceed the per-market cap")]
+    PointsCapExceeded,
+    #[msg("Market has not been resolved yet")]
+    MarketNotResolved,
+    #[msg("Room is not in the expected phase")]
+    WrongPhase,
 
     // ── settlement / proofs ─────────────────────────────────────────────────
     #[msg("Provided oracle account does not match the TxLINE program id")]

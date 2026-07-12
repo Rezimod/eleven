@@ -9,7 +9,12 @@
  * Fairness (fixes pay-to-win):
  *   - Fixed buy-in per room; the pot is buy_in × players. Stake never buys points.
  *   - Points come ONLY from correct, revealed predictions; everyone starts at 0.
- *   - A market's points scale with its odds (longer odds → more points).
+ *   - Every pick FREEZES its odds→points snapshot at the moment it is placed —
+ *     pre-match picks lock pre-match odds, live picks lock the live odds at that
+ *     instant. Scoring reads the frozen value; nothing is recomputed later.
+ *   - A WRONG pick costs a small penalty (WRONG_PICK_PENALTY_BPS of its frozen
+ *     potential gain) — deters spray-betting/point-farming without letting the
+ *     penalty dominate skill. Totals are signed; the winner is still max points.
  *   - Winner(s) = most points → take the pot minus a capped rake; ties split equally.
  */
 
@@ -22,6 +27,19 @@ export type Side = "yes" | "no";
 /** Rake is capped at 10% — mirrors `MAX_RAKE_BPS` on-chain. */
 export const MAX_RAKE_BPS = 1_000;
 export const MIN_PLAYERS = 2;
+
+/**
+ * The on-chain room state machine: Lobby → Live → FullTime → Settled (Refunding
+ * is the void branch). Mirrors `RoomPhase` on-chain.
+ */
+export type RoomPhase = "lobby" | "live" | "fulltime" | "settled" | "refunding";
+
+/** Phase implied by the clock (terminal phases are sticky, decided by the caller). */
+export function phaseOf(kickoffTs: number, endTs: number, now: number): RoomPhase {
+  if (now >= endTs) return "fulltime";
+  if (now >= kickoffTs) return "live";
+  return "lobby";
+}
 
 // ── markets (provable predicates over TxLINE-proven stats) ───────────────────
 
@@ -60,6 +78,12 @@ export interface Prediction {
   player: string;
   marketId: string;
   side: Side;
+  /**
+   * FROZEN odds snapshot: the points this pick earns if correct, captured from
+   * the market's odds AT THE MOMENT the bet was placed (clamped to the cap) and
+   * never recomputed. Mirrors `Prediction.award_points` on-chain.
+   */
+  awardPoints: number;
 }
 
 export type RoomStatus = "open" | "settled" | "refunding";
@@ -101,6 +125,32 @@ export const MIN_MARKET_POINTS = 10;
 export const MAX_MARKET_POINTS = 1_000;
 
 /**
+ * ANTI-DRAIN cap — the most points one market can award a player. A pick's odds
+ * snapshot is frozen and clamped to this at lock, so a single longshot can't
+ * dominate the pot. Mirrors `MAX_POINTS_PER_MARKET` on-chain.
+ */
+export const MAX_POINTS_PER_MARKET = MAX_MARKET_POINTS;
+
+/**
+ * ANTI-DRAIN penalty — a WRONG pick costs this fraction (basis points) of its
+ * frozen potential gain. Small by design: it stops spamming every market for
+ * free upside without ever dominating skill. Mirrors `WRONG_PICK_PENALTY_BPS`
+ * on-chain; 1_000 = 10% of the pick's frozen award.
+ */
+export const WRONG_PICK_PENALTY_BPS = 1_000;
+
+/** The (small) points a wrong pick costs, from its frozen award. Deterministic. */
+export function wrongPickPenalty(awardPoints: number): number {
+  return Math.floor((awardPoints * WRONG_PICK_PENALTY_BPS) / 10_000);
+}
+
+/** Freeze a pick's award: the odds-derived points, clamped to the cap. Immutable
+ *  once taken — scoring reads this, never recomputes, so stake can't change it. */
+export function freezeAward(points: number): number {
+  return Math.min(points, MAX_POINTS_PER_MARKET);
+}
+
+/**
  * Points for correctly calling an outcome with implied probability `prob`.
  * Longer odds (smaller `prob`) pay more. Deterministic integer output.
  */
@@ -113,6 +163,15 @@ export function pointsFromOdds(prob: number): number {
 /** yes/no point values from the `yes` implied probability (TxLINE odds or a table). */
 export function marketPoints(yesProb: number): { yesPoints: number; noPoints: number } {
   return { yesPoints: pointsFromOdds(yesProb), noPoints: pointsFromOdds(1 - yesProb) };
+}
+
+/**
+ * The decimal odds a points value represents (points = BASE_POINTS × odds), for
+ * sportsbook-style display: 100 pts → 2.00, 75 pts → 1.50. Display only —
+ * scoring always reads the frozen integer points, never this.
+ */
+export function decimalOdds(points: number): number {
+  return points / BASE_POINTS;
 }
 
 // ── room lifecycle (pure, immutable) ─────────────────────────────────────────
@@ -146,6 +205,21 @@ export function createRoom(cfg: RoomConfig): Room {
   };
 }
 
+/**
+ * Add a market to an open room after creation. Free-play only — the on-chain path
+ * commits its markets inline at creation; this backs the live-wave generator, which
+ * opens provable markets as the match unfolds. Mirrors createRoom's per-market init.
+ */
+export function addMarket(room: Room, spec: MarketSpec): Room {
+  if (room.markets.some((m) => m.id === spec.id)) return room;
+  if (spec.yesPoints <= 0 || spec.noPoints <= 0) throw new Error("market points must be positive");
+  return {
+    ...room,
+    markets: [...room.markets, spec],
+    marketState: { ...room.marketState, [spec.id]: { resolved: false } },
+  };
+}
+
 export function joinRoom(room: Room, player: string, now: number): Room {
   if (room.status !== "open") throw new Error("room is not open");
   if (now >= room.joinDeadline) throw new Error("join window closed");
@@ -154,7 +228,12 @@ export function joinRoom(room: Room, player: string, now: number): Room {
   return { ...room, players: [...room.players, player] };
 }
 
-/** Commit-and-reveal a prediction (the pure engine models the resolved pick). */
+/**
+ * Commit-and-reveal a prediction (the pure engine models the resolved pick).
+ * The pick's odds→points value is SNAPSHOTTED HERE — at the moment the bet is
+ * placed — so pre-match bets carry pre-match odds and live bets carry the live
+ * odds of that instant. Frozen, capped, never recomputed.
+ */
 export function predict(room: Room, player: string, marketId: string, side: Side, now: number): Room {
   const market = room.markets.find((m) => m.id === marketId);
   if (!market) throw new Error("no such market");
@@ -164,7 +243,8 @@ export function predict(room: Room, player: string, marketId: string, side: Side
   if (room.predictions.some((p) => p.player === player && p.marketId === marketId)) {
     throw new Error("already predicted this market");
   }
-  return { ...room, predictions: [...room.predictions, { player, marketId, side }] };
+  const awardPoints = freezeAward(side === "yes" ? market.yesPoints : market.noPoints);
+  return { ...room, predictions: [...room.predictions, { player, marketId, side, awardPoints }] };
 }
 
 /** Resolve a market once. `outcome` comes from a proof (yes) or a timeout (no). */
@@ -181,21 +261,25 @@ export function allMarketsResolved(room: Room): boolean {
 
 // ── scoring (deterministic; reproducible from predictions + outcomes) ────────
 
-/** Points a single revealed prediction earns given the market's proven outcome. */
-export function scorePrediction(market: MarketSpec, side: Side, outcome: boolean): number {
+/**
+ * Signed points delta a single revealed prediction produces given the market's
+ * proven outcome: +frozen award if correct, −small penalty if wrong. Reads ONLY
+ * the snapshot taken when the bet was placed — reproducible from committed bets
+ * + proof-verified outcomes alone.
+ */
+export function scorePrediction(pred: Prediction, outcome: boolean): number {
   const winSide: Side = outcome ? "yes" : "no";
-  if (side !== winSide) return 0;
-  return outcome ? market.yesPoints : market.noPoints;
+  return pred.side === winSide ? pred.awardPoints : -wrongPickPenalty(pred.awardPoints);
 }
 
+/** Signed total (penalties can push it below zero — mirrors i64 on-chain). */
 export function playerPoints(room: Room, player: string): number {
   let pts = 0;
   for (const pr of room.predictions) {
     if (pr.player !== player) continue;
     const st = room.marketState[pr.marketId];
     if (!st?.resolved || st.outcome === undefined) continue;
-    const m = room.markets.find((x) => x.id === pr.marketId)!;
-    pts += scorePrediction(m, pr.side, st.outcome);
+    pts += scorePrediction(pr, st.outcome);
   }
   return pts;
 }

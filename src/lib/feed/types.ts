@@ -67,6 +67,8 @@ export interface MatchSummary {
   status: "live" | "upcoming" | "final";
   score: Score;
   minute: number;
+  /** Scheduled kickoff, ms epoch. Pre-match markets lock ~60s before this. */
+  kickoffTs: number;
   kickoffLabel: string;
 }
 

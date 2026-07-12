@@ -34,6 +34,8 @@ export async function GET() {
 
   // Union the WC window (one snapshot call per epoch day), de-duped by FixtureId.
   const byId = new Map<number, unknown>();
+  let okCount = 0;
+  let lastStatus = 0;
   await Promise.all(
     Array.from({ length: days }, (_, i) => startDay + i).map(async (day) => {
       const url = new URL(`${origin}/api/fixtures/snapshot`);
@@ -41,7 +43,11 @@ export async function GET() {
       url.searchParams.set("startEpochDay", String(day));
       try {
         const r = await fetch(url, { headers });
-        if (!r.ok) return;
+        if (!r.ok) {
+          lastStatus = r.status;
+          return;
+        }
+        okCount++;
         const list = (await r.json()) as Array<{ FixtureId: number }>;
         for (const f of list) if (f?.FixtureId != null) byId.set(f.FixtureId, f);
       } catch {
@@ -49,6 +55,17 @@ export async function GET() {
       }
     }),
   );
+
+  // If every snapshot call failed, surface it instead of masquerading as "zero
+  // fixtures" — a 403 here almost always means TXLINE_ORIGIN is unset so we hit
+  // prod with a devnet token. Silent empty lists hid this in production.
+  if (okCount === 0 && lastStatus !== 0) {
+    return new Response(
+      `TxLINE snapshot rejected all requests (last HTTP ${lastStatus}, origin ${origin}). ` +
+        `Check TXLINE_ORIGIN (devnet token needs https://txline-dev.txodds.com) and TXLINE_API_KEY.`,
+      { status: 502 },
+    );
+  }
 
   return Response.json([...byId.values()], {
     headers: { "Cache-Control": "no-store" },

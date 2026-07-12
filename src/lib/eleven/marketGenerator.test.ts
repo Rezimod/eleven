@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   MarketGenerator,
   DEFAULT_TEMPLATES,
+  MARKET_MENU,
   PROVABLE_STAT_KEYS,
   STAT_KEY,
   isProvableStat,
@@ -122,14 +123,34 @@ test("a template that tries to settle on a non-provable stat is rejected", () =>
   assert.throws(() => g.update(emptyStats(), 0), /non-provable stat/);
 });
 
+// ── the broad market menu: pre-match + live, ALL provable ─────────────────────
+
+test("every menu market settles on a provable stat — none on shots/fouls/possession", () => {
+  const NON_PROVABLE = { shots: 20, foulsMade: 21, possession: 22, shotsOnTarget: 23 };
+  assert.ok(MARKET_MENU.length >= 8, "a broad menu");
+  assert.ok(MARKET_MENU.some((m) => m.phase === "pre-match"), "has pre-match markets");
+  assert.ok(MARKET_MENU.some((m) => m.phase === "live"), "has live markets");
+  for (const m of MARKET_MENU) {
+    assert.ok(isProvableStat(m.statKey), `menu "${m.id}" settles on a provable stat`);
+    assert.ok(PROVABLE_STAT_KEYS.has(m.statKey));
+    for (const nonProvable of Object.values(NON_PROVABLE)) {
+      assert.notEqual(m.statKey, nonProvable, `menu "${m.id}" never settles on a non-provable stat`);
+    }
+  }
+});
+
 // ── no duplicates / cooldown ──────────────────────────────────────────────────
 
-test("a template does not re-open while its market is still live", () => {
+test("a template never duplicates: a crossed market retires, cooldown blocks a re-fire", () => {
   const g = gen();
   assert.deepEqual(opens(g.update(stats({ corners: 2 }), 10)), ["corner-streak"]);
-  // Another corner burst while the first is still live → no second market.
-  assert.deepEqual(opens(g.update(stats({ corners: 4 }), 20)), []);
-  assert.equal(g.live().filter((m) => m.templateId === "corner-streak").length, 1);
+  // Another burst CROSSES the frozen line (4 > 3): the market is decided, so the
+  // generator retires it — and the 300s cooldown blocks an immediate re-open.
+  // At no point do two live instances of one template exist.
+  const evs = g.update(stats({ corners: 4 }), 20);
+  assert.deepEqual(opens(evs), []);
+  assert.equal(evs.filter((e) => e.type === "expire" && e.market.templateId === "corner-streak").length, 1);
+  assert.equal(g.live().filter((m) => m.templateId === "corner-streak").length, 0);
 });
 
 test("cooldown blocks an immediate re-fire after expiry", () => {

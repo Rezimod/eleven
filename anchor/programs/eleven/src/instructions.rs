@@ -1,15 +1,21 @@
+pub mod advance_phase;
+pub mod commit_live_root;
 pub mod commit_prediction;
 pub mod create_room;
 pub mod join_room;
 pub mod refund;
 pub mod resolve_market;
+pub mod reveal_live_pick;
 pub mod reveal_prediction;
 pub mod settle_room;
 
+pub use advance_phase::*;
+pub use commit_live_root::*;
 pub use commit_prediction::*;
 pub use create_room::*;
 pub use join_room::*;
 pub use refund::*;
 pub use resolve_market::*;
+pub use reveal_live_pick::*;
 pub use reveal_prediction::*;
 pub use settle_room::*;

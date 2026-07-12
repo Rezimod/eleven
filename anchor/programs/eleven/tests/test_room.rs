@@ -8,7 +8,9 @@
 
 use anchor_lang::prelude::{AccountMeta, Pubkey};
 use anchor_lang::solana_program::{instruction::Instruction, system_program};
-use anchor_lang::{InstructionData, ToAccountMetas};
+use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
+
+use eleven::state::{Participant, Room as RoomAccount, RoomPhase};
 
 use eleven::instructions::create_room::{CreateRoomArgs, MarketInit};
 use eleven::instructions::resolve_market::{ResolveKind, ResolveMarketArgs};
@@ -32,7 +34,9 @@ const FIXTURE_ID: u32 = 42;
 // Timeline (unix seconds).
 const T_CREATE: i64 = 500;
 const T_JOIN_DEADLINE: i64 = 1_000;
-const T_LOCK: i64 = 2_000;
+/// Pre-match markets lock exactly at kickoff.
+const T_KICKOFF: i64 = 2_000;
+const T_LOCK: i64 = 2_000; // == kickoff for pre-match markets
 const T_RESOLVE_DEADLINE: i64 = 3_000;
 const T_END: i64 = 4_000;
 const T_REFUND_DEADLINE: i64 = 5_000;
@@ -107,6 +111,26 @@ fn market(yes_points: u32, no_points: u32) -> MarketInit {
         resolve_deadline_ts: T_RESOLVE_DEADLINE,
         yes_points,
         no_points,
+        is_live: false,
+    }
+}
+
+/// A live-wave market: locks at `lock` (after kickoff), scored via Merkle picks.
+fn live_market(lock: i64, resolve_deadline: i64, yes_points: u32, no_points: u32) -> MarketInit {
+    MarketInit {
+        stat_key: 1,
+        period: 0,
+        threshold: 0,
+        comparison: 0,
+        has_second: false,
+        stat_key2: 0,
+        period2: 0,
+        op: 0,
+        lock_ts: lock,
+        resolve_deadline_ts: resolve_deadline,
+        yes_points,
+        no_points,
+        is_live: true,
     }
 }
 
@@ -140,6 +164,7 @@ fn create_room_ix(
                 rake_bps,
                 max_players,
                 join_deadline_ts: T_JOIN_DEADLINE,
+                kickoff_ts: T_KICKOFF,
                 end_ts: T_END,
                 refund_deadline_ts: T_REFUND_DEADLINE,
                 treasury,
@@ -563,21 +588,33 @@ fn bad_reveal_is_rejected() {
 fn bigger_buy_in_yields_no_extra_points() {
     // Same predictions in a free-play room (buy-in 0) and a paid room (buy-in
     // large) produce identical points — stake never buys points.
-    fn top_points(buy_in: u64) -> u64 {
+    fn top_points(buy_in: u64) -> i64 {
         let mut r = Room::new(buy_in, 0, 2, vec![market(100, 50)]);
         r.predict(0, 0, 1); // YES
         r.predict(1, 0, 0); // NO
         r.resolve_yes(0, r.owners()).expect("resolve");
         let part = participant_pda(&r.room, &r.players[0].pubkey());
         let acc = r.svm.get_account(&part).unwrap();
-        // Participant layout: 8 disc + 32 room + 32 owner + 8 points …
-        let points = u64::from_le_bytes(acc.data[72..80].try_into().unwrap());
+        // Participant layout: 8 disc + 32 room + 32 owner + 8 points (i64) …
+        let points = i64::from_le_bytes(acc.data[72..80].try_into().unwrap());
         points
     }
     let free = top_points(0);
     let paid = top_points(5 * BUY_IN);
     assert_eq!(free, 100, "points come from the market, not the stake");
     assert_eq!(free, paid, "a bigger buy-in yields no extra points");
+}
+
+#[test]
+fn wrong_pick_costs_small_penalty_and_totals_can_go_negative() {
+    // ANTI-DRAIN: a wrong revealed pick costs WRONG_PICK_PENALTY_BPS (10%) of
+    // its frozen award — spraying markets is negative-EV, skill still dominates.
+    let mut r = Room::new(BUY_IN, RAKE_BPS, 2, vec![market(100, 60)]);
+    r.predict(0, 0, 1); // YES, correct → +100
+    r.predict(1, 0, 0); // NO, wrong → -floor(60 * 10%) = -6
+    r.resolve_yes(0, r.owners()).expect("resolve");
+    assert_eq!(read_points(&r.svm, &r.room, &r.players[0].pubkey()), 100);
+    assert_eq!(read_points(&r.svm, &r.room, &r.players[1].pubkey()), -6);
 }
 
 #[test]
@@ -620,4 +657,256 @@ fn large_pot_rake_math_is_safe() {
     r.settle().expect("settle large pot");
     assert_eq!(r.bal(&winner) - before, pot - rake);
     assert_eq!(r.bal(&r.treasury.pubkey()) - t_before, rake);
+}
+
+// ── two-phase / live-wave builders + readers ─────────────────────────────────
+
+fn live_pick_pda(room: &Pubkey, market_index: u16, owner: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[eleven::LIVE_PICK_SEED, room.as_ref(), &market_index.to_le_bytes(), owner.as_ref()],
+        &eleven::id(),
+    )
+    .0
+}
+
+fn advance_phase_ix(room: &Pubkey, cranker: &Pubkey) -> Instruction {
+    Instruction {
+        program_id: eleven::id(),
+        accounts: eleven::accounts::AdvancePhase { cranker: *cranker, room: *room }.to_account_metas(None),
+        data: eleven::instruction::AdvancePhase {}.data(),
+    }
+}
+
+fn commit_live_root_ix(room: &Pubkey, settler: &Pubkey, market_index: u16, root: [u8; 32]) -> Instruction {
+    Instruction {
+        program_id: eleven::id(),
+        accounts: eleven::accounts::CommitLiveRoot { settler: *settler, room: *room }.to_account_metas(None),
+        data: eleven::instruction::CommitLiveRoot { market_index, root }.data(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reveal_live_pick_ix(
+    room: &Pubkey,
+    owner: &Pubkey,
+    market_index: u16,
+    side: u8,
+    award_points: u32,
+    salt: [u8; 32],
+    proof: Vec<ProofNode>,
+) -> Instruction {
+    Instruction {
+        program_id: eleven::id(),
+        accounts: eleven::accounts::RevealLivePick {
+            owner: *owner,
+            room: *room,
+            participant: participant_pda(room, owner),
+            live_pick: live_pick_pda(room, market_index, owner),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: eleven::instruction::RevealLivePick { market_index, side, award_points, salt, proof }.data(),
+    }
+}
+
+fn read_room(svm: &LiteSVM, room: &Pubkey) -> RoomAccount {
+    let acc = svm.get_account(room).unwrap();
+    RoomAccount::try_deserialize(&mut &acc.data[..]).unwrap()
+}
+fn read_points(svm: &LiteSVM, room: &Pubkey, owner: &Pubkey) -> i64 {
+    let acc = svm.get_account(&participant_pda(room, owner)).unwrap();
+    Participant::try_deserialize(&mut &acc.data[..]).unwrap().points
+}
+
+// ── two-phase tests ──────────────────────────────────────────────────────────
+
+#[test]
+fn join_stays_open_through_live_until_cutoff() {
+    // A mid-match joiner can still buy in during LIVE (same buy-in, live bets
+    // only — pre-match markets are locked for everyone at kickoff). Joins shut
+    // at min(kickoff + LIVE_JOIN_CUTOFF_SECS, end_ts); with the harness clock
+    // (end − kickoff = 2000s < 4800s) that cutoff IS full time.
+    let mut r = Room::new(BUY_IN, RAKE_BPS, 1, vec![market(100, 50)]);
+
+    warp(&mut r.svm, T_KICKOFF + 10); // match is LIVE
+    let late = funded(&mut r.svm, 100 * BUY_IN);
+    send(&mut r.svm, &[join_ix(&r.room, &late.pubkey())], &late, &[&late]).expect("live join");
+    let acc = read_room(&r.svm, &r.room);
+    assert_eq!(acc.player_count, 2, "mid-match joiner is in");
+    assert_eq!(acc.pot_lamports, 2 * BUY_IN, "late joiner paid the same buy-in into escrow");
+
+    // The late joiner still cannot touch a pre-match market (locked at kickoff).
+    expect_err(
+        send(&mut r.svm, &[commit_ix(&r.room, &late.pubkey(), 0, 1, [9u8; 32])], &late, &[&late]),
+        "MarketLocked",
+    );
+
+    // At/after the cutoff (= full time here) joining is over.
+    warp(&mut r.svm, T_END);
+    let too_late = funded(&mut r.svm, 100 * BUY_IN);
+    expect_err(
+        send(&mut r.svm, &[join_ix(&r.room, &too_late.pubkey())], &too_late, &[&too_late]),
+        "WrongPhase",
+    );
+}
+
+#[test]
+fn pre_match_market_must_lock_at_kickoff() {
+    let mut svm = boot();
+    let creator = funded(&mut svm, 100 * BUY_IN);
+    let treasury = funded(&mut svm, BUY_IN);
+    let mut bad = market(100, 50);
+    bad.lock_ts = T_KICKOFF + 500; // pre-match market not locking at kickoff
+    let ix = create_room_ix(&creator.pubkey(), 1, BUY_IN, RAKE_BPS, 4, treasury.pubkey(), vec![bad]);
+    expect_err(send(&mut svm, &[ix], &creator, &[&creator]), "PreMatchLockNotKickoff");
+}
+
+#[test]
+fn pre_match_predictions_lock_exactly_at_kickoff() {
+    let mut r = Room::new(BUY_IN, RAKE_BPS, 2, vec![market(100, 50)]);
+    // One tick before kickoff: commit succeeds.
+    warp(&mut r.svm, T_KICKOFF - 1);
+    let p0 = r.players[0].insecure_clone();
+    send(&mut r.svm, &[commit_ix(&r.room, &p0.pubkey(), 0, 1, [1u8; 32])], &p0, &[&p0]).expect("commit before kickoff");
+    // At kickoff exactly: locked.
+    warp(&mut r.svm, T_KICKOFF);
+    let p1 = r.players[1].insecure_clone();
+    expect_err(
+        send(&mut r.svm, &[commit_ix(&r.room, &p1.pubkey(), 0, 1, [2u8; 32])], &p1, &[&p1]),
+        "MarketLocked",
+    );
+}
+
+#[test]
+fn live_market_rejects_pre_match_commit_and_locks_root() {
+    let live = live_market(2_500, 3_000, 100, 50);
+    let mut r = Room::new(BUY_IN, RAKE_BPS, 2, vec![market(100, 50), live]);
+    // A live market can't take a per-player pre-match commit.
+    let p = r.players[0].insecure_clone();
+    expect_err(
+        send(&mut r.svm, &[commit_ix(&r.room, &p.pubkey(), 1, 1, [1u8; 32])], &p, &[&p]),
+        "NotPreMatchMarket",
+    );
+    // The wave root can't be committed after the wave's resolve window closes.
+    warp(&mut r.svm, 3_001);
+    let s = r.settler.insecure_clone();
+    expect_err(
+        send(&mut r.svm, &[commit_live_root_ix(&r.room, &s.pubkey(), 1, [5u8; 32])], &s, &[&s]),
+        "MarketLocked",
+    );
+}
+
+#[test]
+fn frozen_snapshot_is_capped_and_immutable() {
+    // yes_points above the cap → the frozen per-prediction snapshot clamps to it.
+    let mut r = Room::new(BUY_IN, RAKE_BPS, 2, vec![market(5_000, 50)]);
+    r.predict(0, 0, 1); // creator YES → award frozen = min(5000, MAX=1000) = 1000
+    r.predict(1, 0, 0); // p1 NO
+    // Re-reveal is rejected — the snapshot is immutable once set.
+    let p = r.players[0].insecure_clone();
+    r.svm.expire_blockhash(); // fresh blockhash so the retry isn't a duplicate tx
+    expect_err(
+        send(&mut r.svm, &[reveal_ix(&r.room, &p.pubkey(), 0, 1, [1u8; 32])], &p, &[&p]),
+        "AlreadyRevealed",
+    );
+    r.resolve_yes(0, r.owners()).expect("resolve");
+    assert_eq!(read_points(&r.svm, &r.room, &r.players[0].pubkey()), 1_000, "capped frozen points scored");
+}
+
+#[test]
+fn live_pick_merkle_commit_reveal_scores_and_settles() {
+    let live = live_market(2_500, 3_000, 200, 60);
+    let mut r = Room::new(BUY_IN, RAKE_BPS, 3, vec![live]);
+    let (a, b, c) = (r.players[0].pubkey(), r.players[1].pubkey(), r.players[2].pubkey());
+    let (salt_a, salt_b) = ([11u8; 32], [22u8; 32]);
+    // Wave tree: A picks YES (200), B picks NO (60). C is NOT in the tree.
+    let leaf_a = eleven::merkle::live_pick_leaf(&a, 0, 1, 200, &salt_a);
+    let leaf_b = eleven::merkle::live_pick_leaf(&b, 0, 0, 60, &salt_b);
+    let root = eleven::merkle::hash_pair(&leaf_a, &leaf_b);
+    let proof_a = vec![ProofNode { hash: leaf_b, is_right_sibling: true }];
+    let proof_b = vec![ProofNode { hash: leaf_a, is_right_sibling: false }];
+
+    // One tx commits the whole wave (no per-bet transaction).
+    warp(&mut r.svm, 2_400);
+    let s = r.settler.insecure_clone();
+    send(&mut r.svm, &[commit_live_root_ix(&r.room, &s.pubkey(), 0, root)], &s, &[&s]).expect("commit root");
+
+    // Resolve the live market YES (scored via reveals, so no per-player owners).
+    warp(&mut r.svm, 2_600);
+    r.resolve_yes(0, vec![]).expect("resolve live market");
+
+    // Reveal against the root; frozen points score deterministically.
+    let (pa, pb, pc) = (r.players[0].insecure_clone(), r.players[1].insecure_clone(), r.players[2].insecure_clone());
+    send(&mut r.svm, &[reveal_live_pick_ix(&r.room, &a, 0, 1, 200, salt_a, proof_a.clone())], &pa, &[&pa]).expect("reveal A");
+    send(&mut r.svm, &[reveal_live_pick_ix(&r.room, &b, 0, 0, 60, salt_b, proof_b)], &pb, &[&pb]).expect("reveal B");
+    assert_eq!(read_points(&r.svm, &r.room, &a), 200, "A (YES, correct) scored frozen 200");
+    assert_eq!(read_points(&r.svm, &r.room, &b), -6, "B (NO, wrong) pays the small penalty: -10% of frozen 60");
+
+    // A pick not in the committed root is rejected.
+    let bogus = vec![ProofNode { hash: [7u8; 32], is_right_sibling: true }];
+    expect_err(
+        send(&mut r.svm, &[reveal_live_pick_ix(&r.room, &c, 0, 1, 200, [33u8; 32], bogus)], &pc, &[&pc]),
+        "BadMerkleProof",
+    );
+    // A pick can't be revealed twice (its LivePick guard already exists).
+    r.svm.expire_blockhash();
+    expect_err(
+        send(&mut r.svm, &[reveal_live_pick_ix(&r.room, &a, 0, 1, 200, salt_a, proof_a)], &pa, &[&pa]),
+        "already in use",
+    );
+
+    // Full time → settle. A is sole top scorer → takes pot - rake.
+    warp(&mut r.svm, T_END + 10);
+    let pot = BUY_IN * 3;
+    let rake = pot * RAKE_BPS as u64 / 10_000;
+    let before = r.bal(&a);
+    r.settle().expect("settle");
+    assert_eq!(r.bal(&a) - before, pot - rake, "live-pick winner takes pot - rake");
+}
+
+#[test]
+fn live_pick_over_cap_is_rejected() {
+    let live = live_market(2_500, 3_000, 100, 100);
+    let mut r = Room::new(BUY_IN, RAKE_BPS, 2, vec![live]);
+    let a = r.players[0].pubkey();
+    let salt = [5u8; 32];
+    // Leaf built with points ABOVE the cap; reveal must reject before verifying.
+    let leaf = eleven::merkle::live_pick_leaf(&a, 0, 1, 2_000, &salt);
+    warp(&mut r.svm, 2_400);
+    let s = r.settler.insecure_clone();
+    send(&mut r.svm, &[commit_live_root_ix(&r.room, &s.pubkey(), 0, leaf)], &s, &[&s]).expect("commit root");
+    warp(&mut r.svm, 2_600);
+    r.resolve_yes(0, vec![]).expect("resolve");
+    let pa = r.players[0].insecure_clone();
+    expect_err(
+        send(&mut r.svm, &[reveal_live_pick_ix(&r.room, &a, 0, 1, 2_000, salt, vec![])], &pa, &[&pa]),
+        "PointsCapExceeded",
+    );
+}
+
+#[test]
+fn phase_machine_advances_lobby_live_fulltime_settled() {
+    let mut r = Room::new(BUY_IN, RAKE_BPS, 2, vec![market(100, 50)]);
+    let cr = r.settler.insecure_clone();
+    // Pre-match picks in Lobby.
+    r.predict(0, 0, 1);
+    r.predict(1, 0, 0);
+    assert_eq!(read_room(&r.svm, &r.room).phase, RoomPhase::Lobby);
+
+    warp(&mut r.svm, T_KICKOFF);
+    send(&mut r.svm, &[advance_phase_ix(&r.room, &cr.pubkey())], &cr, &[&cr]).expect("→ Live");
+    assert_eq!(read_room(&r.svm, &r.room).phase, RoomPhase::Live);
+
+    warp(&mut r.svm, T_END);
+    r.svm.expire_blockhash(); // distinct blockhash from the →Live advance
+    send(&mut r.svm, &[advance_phase_ix(&r.room, &cr.pubkey())], &cr, &[&cr]).expect("→ FullTime");
+    assert_eq!(read_room(&r.svm, &r.room).phase, RoomPhase::FullTime);
+
+    r.resolve_yes(0, r.owners()).expect("resolve");
+    warp(&mut r.svm, T_END + 10);
+    r.settle().expect("settle");
+    assert_eq!(read_room(&r.svm, &r.room).phase, RoomPhase::Settled);
+    // Terminal phase never moves.
+    r.svm.expire_blockhash();
+    expect_err(send(&mut r.svm, &[advance_phase_ix(&r.room, &cr.pubkey())], &cr, &[&cr]), "WrongPhase");
 }

@@ -8,22 +8,24 @@
     "start": "next start",
     "lint": "eslint",
     "probe": "node scripts/txline-probe.ts",
-    "test:core": "node --test src/lib/eleven/core.test.ts"
+    "test:core": "node --test src/lib/eleven/core.test.ts src/lib/eleven/round.test.ts src/lib/eleven/baseline.test.ts"
   },
   "dependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
+    "@solana/web3.js": "^1.98.4",
+    "next": "15.5.20",
     "react": "19.1.0",
-    "react-dom": "19.1.0",
-    "next": "15.5.20"
+    "react-dom": "19.1.0"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
     "eslint": "^9",
     "eslint-config-next": "15.5.20",
-    "@eslint/eslintrc": "^3"
+    "tailwindcss": "^4",
+    "typescript": "^5"
   }
 }

@@ -11,13 +11,14 @@ const PERIOD_LABEL: Record<MatchClock["period"], string> = {
 
 function TeamCol({ short, name, align }: { short: string; name: string; align: "left" | "right" }) {
   return (
-    <div className={`flex flex-col items-center gap-2 ${align === "left" ? "sm:items-start" : "sm:items-end"}`}>
-      <TeamFlag short={short} size={34} />
-      <span className="text-center text-[13px] font-medium text-muted">{name || short}</span>
+    <div className={`flex min-w-0 items-center gap-2 ${align === "right" ? "flex-row-reverse text-right" : ""}`}>
+      <TeamFlag short={short} size={24} />
+      <span className="truncate text-[13px] font-medium text-muted">{name || short}</span>
     </div>
   );
 }
 
+/** Compact match header — score + clock, sized to sit in the sticky top bar. */
 export function ScoreHeader({
   home,
   away,
@@ -38,17 +39,16 @@ export function ScoreHeader({
   const meta = clock.running ? `${label} · ${clock.minute}'` : label;
 
   return (
-    <div className="card grid grid-cols-3 items-center gap-2 p-5">
+    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
       <TeamCol short={homeShort} name={home} align="right" />
 
       <div className="flex flex-col items-center">
-        <div
-          key={`${score.home}-${score.away}`}
-          className="display animate-scorebump text-[46px]"
-        >
-          {score.home}<span className="mx-1.5 text-faint">–</span>{score.away}
+        <div key={`${score.home}-${score.away}`} className="display animate-scorebump text-[30px] leading-none">
+          {score.home}
+          <span className="mx-1 text-faint">–</span>
+          {score.away}
         </div>
-        <div className="num mt-1 text-center text-[12px] tracking-wide text-lime">{meta}</div>
+        <div className="num mt-0.5 text-center text-[10px] tracking-wide text-lime">{meta}</div>
       </div>
 
       <TeamCol short={awayShort} name={away} align="left" />

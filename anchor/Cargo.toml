@@ -13,6 +13,9 @@ rust-version = "1.89.0"
 overflow-checks = true
 lto = "fat"
 codegen-units = 1
+# Size-optimized: devnet rent for the upgrade buffer scales with binary size
+# (~6960 lamports/byte), and this program is I/O-bound, not compute-bound.
+opt-level = "z"
 [profile.release.build-override]
 opt-level = 3
 incremental = false

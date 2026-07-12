@@ -18,6 +18,8 @@ pub struct MarketInit {
     pub resolve_deadline_ts: i64,
     pub yes_points: u32,
     pub no_points: u32,
+    /// PRE-MATCH (false, locks at kickoff) vs LIVE-WAVE (true, later short lock).
+    pub is_live: bool,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
@@ -28,6 +30,7 @@ pub struct CreateRoomArgs {
     pub rake_bps: u16,
     pub max_players: u16,
     pub join_deadline_ts: i64,
+    pub kickoff_ts: i64,
     pub end_ts: i64,
     pub refund_deadline_ts: i64,
     pub treasury: Pubkey,
@@ -73,7 +76,9 @@ pub fn handle_create_room(ctx: Context<CreateRoom>, args: CreateRoomArgs) -> Res
         ElevenError::BadMarketCount,
     );
     require!(
-        args.join_deadline_ts < args.end_ts && args.end_ts <= args.refund_deadline_ts,
+        args.join_deadline_ts <= args.kickoff_ts
+            && args.kickoff_ts < args.end_ts
+            && args.end_ts <= args.refund_deadline_ts,
         ElevenError::BadDeadlines,
     );
 
@@ -82,12 +87,22 @@ pub fn handle_create_room(ctx: Context<CreateRoom>, args: CreateRoomArgs) -> Res
         require!(m.comparison <= 2, ElevenError::PredicateMismatch);
         require!(!m.has_second || m.op <= 1, ElevenError::PredicateMismatch);
         require!(m.yes_points > 0 && m.no_points > 0, ElevenError::BadPoints);
-        require!(
-            args.join_deadline_ts <= m.lock_ts
-                && m.lock_ts <= m.resolve_deadline_ts
-                && m.resolve_deadline_ts <= args.end_ts,
-            ElevenError::BadDeadlines,
-        );
+        // Pre-match markets lock EXACTLY at kickoff; live-wave markets lock later
+        // (after kickoff, before full time). Both resolve by full time.
+        if m.is_live {
+            require!(
+                args.kickoff_ts <= m.lock_ts
+                    && m.lock_ts <= m.resolve_deadline_ts
+                    && m.resolve_deadline_ts <= args.end_ts,
+                ElevenError::BadDeadlines,
+            );
+        } else {
+            require!(m.lock_ts == args.kickoff_ts, ElevenError::PreMatchLockNotKickoff);
+            require!(
+                m.resolve_deadline_ts <= args.end_ts,
+                ElevenError::BadDeadlines,
+            );
+        }
         markets.push(Market {
             stat_key: m.stat_key,
             period: m.period,
@@ -104,6 +119,9 @@ pub fn handle_create_room(ctx: Context<CreateRoom>, args: CreateRoomArgs) -> Res
             reveal_count: 0,
             resolved: false,
             outcome: false,
+            is_live: m.is_live,
+            commit_root: [0u8; 32],
+            root_committed: false,
         });
     }
 
@@ -118,11 +136,12 @@ pub fn handle_create_room(ctx: Context<CreateRoom>, args: CreateRoomArgs) -> Res
     room.max_players = args.max_players;
     room.player_count = 1;
     room.join_deadline_ts = args.join_deadline_ts;
+    room.kickoff_ts = args.kickoff_ts;
     room.end_ts = args.end_ts;
     room.refund_deadline_ts = args.refund_deadline_ts;
     room.pot_lamports = args.buy_in_lamports;
     room.resolved_market_count = 0;
-    room.state = RoomState::Open;
+    room.phase = RoomPhase::Lobby;
     room.settled = false;
     room.markets = markets;
     room.bump = ctx.bumps.room;

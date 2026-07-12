@@ -9,5 +9,7 @@ export default async function MatchPage({
 }) {
   const { id } = await params;
   const { tier } = await searchParams;
-  return <MatchRoom fixtureId={Number(id)} tier={tier ?? "free"} />;
+  // Rooms are PAID ONLY — an unknown or legacy `free` tier falls back to the
+  // lowest paid buy-in; there is no free entry.
+  return <MatchRoom fixtureId={Number(id)} tier={tier ?? "low"} />;
 }

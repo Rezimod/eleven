@@ -25,7 +25,7 @@ pub struct SettleRoom<'info> {
 pub fn handle_settle_room<'info>(ctx: Context<'info, SettleRoom<'info>>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
 
-    let (room_key, pot, rake_bps, player_count, market_count, resolved_count, state, settled) = {
+    let (room_key, pot, rake_bps, player_count, market_count, resolved_count, phase, settled) = {
         let r = &ctx.accounts.room;
         (
             r.key(),
@@ -34,13 +34,17 @@ pub fn handle_settle_room<'info>(ctx: Context<'info, SettleRoom<'info>>) -> Resu
             r.player_count,
             r.markets.len() as u16,
             r.resolved_market_count,
-            r.state,
+            r.phase,
             r.settled,
         )
     };
 
     require!(!settled, ElevenError::RoomAlreadySettled);
-    require!(state == RoomState::Open, ElevenError::BadRoomState);
+    require!(
+        phase != RoomPhase::Settled && phase != RoomPhase::Refunding,
+        ElevenError::WrongPhase,
+    );
+    // Full time gates settlement — the room is in FullTime by the clock here.
     require!(now >= ctx.accounts.room.end_ts, ElevenError::EndNotReached);
     // No settlement until every market has been resolved (each yes needs a proof).
     require!(resolved_count == market_count, ElevenError::MarketsUnresolved);
@@ -53,11 +57,13 @@ pub fn handle_settle_room<'info>(ctx: Context<'info, SettleRoom<'info>>) -> Resu
     );
 
     struct Row {
-        points: u64,
+        points: i64,
         wallet_idx: usize,
     }
     let mut rows: Vec<Row> = Vec::with_capacity(player_count as usize);
-    let mut max_points: u64 = 0;
+    // Points are signed (wrong-pick penalties) — the winner is max, even if
+    // every total is negative, so start below any representable score.
+    let mut max_points: i64 = i64::MIN;
     let mut prev: Option<Pubkey> = None;
 
     for (i, pair) in rem.chunks(2).enumerate() {
@@ -127,7 +133,7 @@ pub fn handle_settle_room<'info>(ctx: Context<'info, SettleRoom<'info>>) -> Resu
 
     let room = &mut ctx.accounts.room;
     room.settled = true;
-    room.state = RoomState::Settled;
+    room.phase = RoomPhase::Settled;
     room.pot_lamports = 0;
 
     msg!(
