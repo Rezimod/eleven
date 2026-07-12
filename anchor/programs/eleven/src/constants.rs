@@ -16,6 +16,11 @@ pub const LIVE_PICK_SEED: &[u8] = b"livepick";
 
 /// Rake is capped on-chain at 10% (basis points). No room can charge more.
 pub const MAX_RAKE_BPS: u16 = 1_000;
+/// Room JOIN stays open through the LIVE phase until this long after kickoff
+/// (~80'), so a mid-match joiner can still buy in and bet the live markets.
+/// Pre-match MARKETS still lock exactly at kickoff — joining late buys entry,
+/// never a locked bet.
+pub const LIVE_JOIN_CUTOFF_SECS: i64 = 80 * 60;
 /// A room needs at least this many players to run (else it refunds).
 pub const MIN_PLAYERS: u16 = 2;
 /// Hard cap on players — bounds `settle_room`/`resolve_market` account lists so

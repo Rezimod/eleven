@@ -11,6 +11,7 @@ import {
   fetchRoomsForFixture,
   findJoinedRoom,
   isJoinable,
+  joinCutoffSec,
   type OpenRoom,
 } from "./rooms";
 
@@ -24,9 +25,8 @@ import {
 const ENTRY_BUFFER_LAMPORTS = 0.02 * LAMPORTS_PER_SOL;
 
 export type EntryStatus =
-  | "loading" // discovering rooms / participant PDA
-  | "signed-out"
-  | "closed" // kickoff passed — on-chain joins are closed
+  | "loading" // provisioning the guest wallet / discovering rooms
+  | "closed" // past the late-join cutoff (~80 min) — entries are closed
   | "ready" // can pay + enter (join or create)
   | "short" // insufficient demo SOL for the buy-in
   | "approving" // wallet approval prompt open
@@ -82,7 +82,7 @@ export function useOnchainRoom(fixtureId: number, buyInLamports: number, kickoff
   );
 
   const join = useCallback(async () => {
-    if (inFlight.current || !wallet.signedIn || !wallet.address || joinedRoom) return;
+    if (inFlight.current || !wallet.ready || !wallet.address || joinedRoom) return;
     inFlight.current = true;
     setError(null);
     setTxPhase("approving");
@@ -111,15 +111,16 @@ export function useOnchainRoom(fixtureId: number, buyInLamports: number, kickoff
   }, [wallet, joinedRoom, openRoom, fixtureId, buyInLamports, kickoffTsMs, refresh]);
 
   const shownRoom = joinedRoom ?? openRoom;
-  const kickoffPassed = kickoffTsMs !== null && Date.now() >= kickoffTsMs;
+  // Entries stay open through LIVE until ~80 min after kickoff (on-chain rule).
+  const cutoffPassed =
+    kickoffTsMs !== null && Math.floor(Date.now() / 1000) >= joinCutoffSec(Math.floor(kickoffTsMs / 1000));
 
   let status: EntryStatus;
   if (joinedRoom) status = "joined";
   else if (txPhase === "approving") status = "approving";
   else if (txPhase === "confirming") status = "confirming";
-  else if (!wallet.ready || (wallet.signedIn && !discovered)) status = "loading";
-  else if (!wallet.signedIn) status = "signed-out";
-  else if (!openRoom && kickoffPassed) status = "closed";
+  else if (!wallet.ready || !discovered) status = "loading";
+  else if (!openRoom && cutoffPassed) status = "closed";
   else if (wallet.balanceLamports !== null && wallet.balanceLamports < buyInLamports + ENTRY_BUFFER_LAMPORTS)
     status = "short";
   else status = "ready";

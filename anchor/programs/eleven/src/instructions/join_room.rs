@@ -31,9 +31,22 @@ pub fn handle_join_room(ctx: Context<JoinRoom>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let room = &mut ctx.accounts.room;
 
-    require!(room.phase == RoomPhase::Lobby, ElevenError::WrongPhase);
+    // Joining stays open through the LIVE phase (a mid-match joiner pays the
+    // same buy-in and bets the live markets; pre-match markets are locked for
+    // everyone at kickoff), but never past the late cutoff or full time.
+    let effective = room
+        .phase
+        .from_clock(now, room.kickoff_ts, room.end_ts);
+    require!(
+        effective == RoomPhase::Lobby || effective == RoomPhase::Live,
+        ElevenError::WrongPhase,
+    );
     require!(!room.settled, ElevenError::RoomAlreadySettled);
-    require!(now < room.join_deadline_ts, ElevenError::JoinClosed);
+    let cutoff = room
+        .kickoff_ts
+        .saturating_add(LIVE_JOIN_CUTOFF_SECS)
+        .min(room.end_ts);
+    require!(now < cutoff, ElevenError::JoinClosed);
     require!(room.player_count < room.max_players, ElevenError::RoomFull);
 
     // The `init` on the participant PDA makes double-joining impossible (the

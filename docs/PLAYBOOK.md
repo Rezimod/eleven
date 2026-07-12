@@ -153,7 +153,7 @@ The `eleven` program is the room engine. It handles user funds, so fairness + se
 
 **Accounts.**
 
-- **Room** (PDA `["room", authority, room_id]`) — fixed `buy_in`, capped `rake_bps` (≤ 10%), `max_players` (≤ 16), join/end/refund deadlines, `pot`, `treasury`, and an inline list of **Markets** (each a committed `validate_stat` predicate + timing + `yes/no` points + resolution state). Markets are inline for atomicity and a smaller attack surface.
+- **Room** (PDA `["room", authority, room_id]`) — fixed `buy_in`, capped `rake_bps` (≤ 10%), `max_players` (≤ 16), join/end/refund deadlines, `pot`, `treasury`, and an inline list of **Markets** (each a committed `validate_stat` predicate + timing + `yes/no` points + resolution state). Markets are inline for atomicity and a smaller attack surface. **Joining stays open through LIVE** until `min(kickoff + 80', full time)` (`LIVE_JOIN_CUTOFF_SECS`) — a mid-match joiner pays the same buy-in and bets the live markets only; pre-match markets still lock for everyone exactly at kickoff.
 - **Participant** (PDA `["participant", room, owner]`) — `points` (start 0, only from correct predictions), `buy_in_paid` (for exact refunds).
 - **Prediction** (PDA `["prediction", room, market_index, owner]`) — a commit-reveal pick: `commitment = sha256(side ++ salt ++ owner ++ market_index)`, then the revealed `side`.
 

@@ -19,6 +19,15 @@ const MATCH_SECONDS = 3 * 60 * 60; // room end: kickoff + 3h covers 90' + stoppa
 const CORNERS_LINE = 6;
 const GOALS_LINE = 2;
 
+/** Joins stay open through LIVE until ~80' — mirrors LIVE_JOIN_CUTOFF_SECS on-chain. */
+export const LIVE_JOIN_CUTOFF_SECS = 80 * 60;
+
+/** The moment joining a room for this kickoff closes (unix seconds). */
+export function joinCutoffSec(kickoffSec: number, endSec?: number): number {
+  const cutoff = kickoffSec + LIVE_JOIN_CUTOFF_SECS;
+  return endSec === undefined ? cutoff : Math.min(cutoff, endSec);
+}
+
 // Room account layout: 8 discriminator + 32 authority + 32 treasury + 8 room_id.
 const FIXTURE_ID_OFFSET = 80;
 
@@ -80,12 +89,15 @@ export async function fetchRoomsForFixture(fixtureId: number): Promise<OpenRoom[
 }
 
 export function isJoinable(r: RoomAccount, buyInLamports: number, nowSec: number): boolean {
+  // Stored phase only moves when the advance_phase crank runs, so accept
+  // Lobby or Live and gate on the clock like the program does: joins are open
+  // from creation through LIVE until min(kickoff + 80', full time).
   return (
-    "lobby" in r.phase &&
+    ("lobby" in r.phase || "live" in r.phase) &&
     !r.settled &&
     r.buyInLamports.eq(new BN(buyInLamports)) &&
     r.playerCount < r.maxPlayers &&
-    nowSec < r.joinDeadlineTs.toNumber()
+    nowSec < joinCutoffSec(r.kickoffTs.toNumber(), r.endTs.toNumber())
   );
 }
 

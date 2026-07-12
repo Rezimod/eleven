@@ -1,209 +1,147 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
-import { useSignAndSendTransaction, useWallets } from "@privy-io/react-auth/solana";
-import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
-import { utils } from "@coral-xyz/anchor";
-import type { Transaction } from "@solana/web3.js";
+import { Keypair, PublicKey, type Transaction } from "@solana/web3.js";
 
-import { RPC_URL, SOLANA_CHAIN, TARGET_DEMO_LAMPORTS, WS_URL, getConnection } from "@/lib/chain/config";
+import { TARGET_DEMO_LAMPORTS, getConnection } from "@/lib/chain/config";
 
 /**
- * Real wallet auth via Privy: email sign-in → embedded Solana wallet on DEVNET,
- * no seed phrase. All funds are DEMO devnet SOL (airdropped) — never mainnet,
- * never real money (the chain id + RPC are pinned to devnet in lib/chain/config).
+ * NO SIGN-IN — land and play. A guest wallet is provisioned SILENTLY on first
+ * load (a client keypair persisted in localStorage) and granted $15.00 demo
+ * money from the server faucet (once per IP). The wallet exists purely so the
+ * on-chain escrow entry works under the hood; the user never sees it.
+ *
+ * DEVNET DEMO ONLY: the secret lives in localStorage, which is fine for
+ * throwaway demo money and would be unacceptable for real funds. The RPC and
+ * chain are pinned to devnet in lib/chain/config (mainnet URLs are refused).
  */
 
-export const PRIVY_SETUP_HINT =
-  "Set NEXT_PUBLIC_PRIVY_APP_ID=<your Privy app id> in .env.local — create a free app at " +
-  "https://dashboard.privy.io (enable Email login + Solana embedded wallets), then restart `npm run dev`.";
-
+const STORAGE_KEY = "eleven-guest-wallet-v1";
 
 export interface WalletState {
-  /** False until NEXT_PUBLIC_PRIVY_APP_ID is set — sign-in is unavailable. */
-  configured: boolean;
+  /** True once the guest wallet is provisioned (a beat after first render). */
   ready: boolean;
-  signedIn: boolean;
   address: string | null;
-  /** DEMO devnet SOL balance; null while loading. */
+  /** Demo balance in lamports; null while loading. */
   balanceLamports: number | null;
-  /** Demo airdrop in flight. */
+  /** Demo grant/top-up in flight. */
   funding: boolean;
-  signIn: () => void;
-  signOut: () => void;
-  /** One-tap demo top-up: airdrops devnet SOL to the embedded wallet. */
+  /** Set when the faucet declines (e.g. this network already claimed its $15). */
+  fundingNote: string | null;
+  /** Ask the server faucet to top this guest up (granted once per IP). */
   topUp: () => Promise<void>;
   refreshBalance: () => Promise<void>;
-  /** Sign + send a devnet transaction with the embedded wallet; resolves to the confirmed signature. */
+  /** Sign + send a devnet transaction with the guest keypair; resolves confirmed. */
   sendTx: (tx: Transaction) => Promise<string>;
 }
 
 const WalletContext = createContext<WalletState | null>(null);
 
-async function requestDemoAirdrop(address: string): Promise<void> {
-  const r = await fetch("/api/demo/airdrop", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ address }),
-  });
-  if (!r.ok) throw new Error((await r.text()) || `airdrop failed (HTTP ${r.status})`);
+/** Load-or-create the persisted guest keypair. localStorage only — demo money. */
+function loadGuestKeypair(): Keypair {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
+  } catch {
+    /* corrupted entry → fall through to a fresh guest */
+  }
+  const kp = Keypair.generate();
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(kp.secretKey)));
+  return kp;
 }
 
-function InnerWalletProvider({ children }: { children: React.ReactNode }) {
-  const { ready, authenticated, login, logout } = usePrivy();
-  const { wallets } = useWallets();
-  const { signAndSendTransaction } = useSignAndSendTransaction();
-
-  const wallet = wallets[0] ?? null;
-  const address = wallet?.address ?? null;
-
+export function WalletProvider({ children }: { children: React.ReactNode }) {
+  const [keypair, setKeypair] = useState<Keypair | null>(null);
   const [balanceLamports, setBalance] = useState<number | null>(null);
   const [funding, setFunding] = useState(false);
-  const autoFunded = useRef<Set<string>>(new Set());
+  const [fundingNote, setFundingNote] = useState<string | null>(null);
+  const granted = useRef(false);
+
+  // Silent provisioning: no login screen, no prompt — the wallet just exists.
+  useEffect(() => {
+    setKeypair(loadGuestKeypair());
+  }, []);
+
+  const address = keypair ? keypair.publicKey.toBase58() : null;
 
   const refreshBalance = useCallback(async () => {
-    if (!address) return;
+    if (!keypair) return;
     try {
-      const { PublicKey } = await import("@solana/web3.js");
-      setBalance(await getConnection().getBalance(new PublicKey(address)));
+      setBalance(await getConnection().getBalance(keypair.publicKey));
     } catch {
       /* transient RPC failure — keep the last known balance */
     }
-  }, [address]);
+  }, [keypair]);
 
   useEffect(() => {
-    setBalance(null);
-    if (!address) return;
+    if (!keypair) return;
     refreshBalance();
     const t = setInterval(refreshBalance, 15_000);
     return () => clearInterval(t);
-  }, [address, refreshBalance]);
+  }, [keypair, refreshBalance]);
 
   const topUp = useCallback(async () => {
     if (!address || funding) return;
     setFunding(true);
+    setFundingNote(null);
     try {
-      await requestDemoAirdrop(address);
+      const r = await fetch("/api/demo/airdrop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address }),
+      });
+      if (!r.ok) {
+        setFundingNote((await r.text()) || "demo top-up unavailable right now");
+        return;
+      }
       await refreshBalance();
     } finally {
       setFunding(false);
     }
   }, [address, funding, refreshBalance]);
 
-  // GUARANTEED $50 DEMO BALANCE: on sign-in, any account below the target is
-  // topped up to it automatically — a brand-new account starts at $50.00 and
-  // can play instantly. Once per address per session; manual "Top up to $50"
-  // covers mid-session shortfalls.
+  // GRANT $15 ON LANDING: the persisted wallet keeps its balance across
+  // refreshes (the chain is the truth — no re-grant), and the server enforces
+  // the once-per-IP rule; this client-side guard just avoids redundant calls.
   useEffect(() => {
-    if (!authenticated || !address || balanceLamports === null) return;
+    if (!address || balanceLamports === null || granted.current) return;
     if (balanceLamports >= TARGET_DEMO_LAMPORTS) return;
-    if (autoFunded.current.has(address)) return;
-    autoFunded.current.add(address);
-    topUp().catch(() => {
-      /* faucet dry — the join gate offers a manual retry */
-    });
-  }, [authenticated, address, balanceLamports, topUp]);
+    granted.current = true;
+    topUp().catch(() => {});
+  }, [address, balanceLamports, topUp]);
 
   const sendTx = useCallback(
     async (tx: Transaction) => {
-      if (!wallet || !address) throw new Error("sign in first");
-      const { PublicKey } = await import("@solana/web3.js");
+      if (!keypair) throw new Error("guest wallet not ready yet");
       const conn = getConnection();
       const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
-      tx.feePayer = new PublicKey(address);
+      tx.feePayer = new PublicKey(keypair.publicKey);
       tx.recentBlockhash = blockhash;
-      const { signature } = await signAndSendTransaction({
-        transaction: new Uint8Array(tx.serialize({ requireAllSignatures: false, verifySignatures: false })),
-        wallet,
-        chain: SOLANA_CHAIN,
-      });
-      const sig = utils.bytes.bs58.encode(signature);
+      tx.sign(keypair);
+      const sig = await conn.sendRawTransaction(tx.serialize());
       const res = await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
       if (res.value.err) throw new Error(`transaction failed: ${JSON.stringify(res.value.err)}`);
       refreshBalance();
       return sig;
     },
-    [wallet, address, signAndSendTransaction, refreshBalance],
+    [keypair, refreshBalance],
   );
 
   const value = useMemo<WalletState>(
     () => ({
-      configured: true,
-      ready,
-      signedIn: ready && authenticated && !!address,
+      ready: keypair !== null,
       address,
       balanceLamports,
       funding,
-      signIn: login,
-      signOut: logout,
+      fundingNote,
       topUp,
       refreshBalance,
       sendTx,
     }),
-    [ready, authenticated, address, balanceLamports, funding, login, logout, topUp, refreshBalance, sendTx],
+    [keypair, address, balanceLamports, funding, fundingNote, topUp, refreshBalance, sendTx],
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
-}
-
-/** No-Privy fallback: the app renders, sign-in explains exactly what to set. */
-function UnconfiguredWalletProvider({ children }: { children: React.ReactNode }) {
-  const warned = useRef(false);
-  const signIn = useCallback(() => {
-    console.error(PRIVY_SETUP_HINT);
-    if (typeof window !== "undefined") window.alert(PRIVY_SETUP_HINT);
-  }, []);
-  useEffect(() => {
-    if (!warned.current) {
-      warned.current = true;
-      console.warn(`ELEVEN wallet auth is not configured. ${PRIVY_SETUP_HINT}`);
-    }
-  }, []);
-  const value = useMemo<WalletState>(
-    () => ({
-      configured: false,
-      ready: true,
-      signedIn: false,
-      address: null,
-      balanceLamports: null,
-      funding: false,
-      signIn,
-      signOut: () => {},
-      topUp: async () => {},
-      refreshBalance: async () => {},
-      sendTx: async () => {
-        throw new Error(PRIVY_SETUP_HINT);
-      },
-    }),
-    [signIn],
-  );
-  return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
-}
-
-export function WalletProvider({ children }: { children: React.ReactNode }) {
-  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-  if (!appId) return <UnconfiguredWalletProvider>{children}</UnconfiguredWalletProvider>;
-  return (
-    <PrivyProvider
-      appId={appId}
-      config={{
-        loginMethods: ["email"],
-        appearance: { theme: "dark", accentColor: "#c6ff3a", walletChainType: "solana-only" },
-        embeddedWallets: { solana: { createOnLogin: "users-without-wallets" }, showWalletUIs: true },
-        solana: {
-          rpcs: {
-            [SOLANA_CHAIN]: {
-              rpc: createSolanaRpc(RPC_URL),
-              rpcSubscriptions: createSolanaRpcSubscriptions(WS_URL),
-            },
-          },
-        },
-      }}
-    >
-      <InnerWalletProvider>{children}</InnerWalletProvider>
-    </PrivyProvider>
-  );
 }
 
 export function useWallet(): WalletState {

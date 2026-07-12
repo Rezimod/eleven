@@ -721,6 +721,36 @@ fn read_points(svm: &LiteSVM, room: &Pubkey, owner: &Pubkey) -> i64 {
 // ── two-phase tests ──────────────────────────────────────────────────────────
 
 #[test]
+fn join_stays_open_through_live_until_cutoff() {
+    // A mid-match joiner can still buy in during LIVE (same buy-in, live bets
+    // only — pre-match markets are locked for everyone at kickoff). Joins shut
+    // at min(kickoff + LIVE_JOIN_CUTOFF_SECS, end_ts); with the harness clock
+    // (end − kickoff = 2000s < 4800s) that cutoff IS full time.
+    let mut r = Room::new(BUY_IN, RAKE_BPS, 1, vec![market(100, 50)]);
+
+    warp(&mut r.svm, T_KICKOFF + 10); // match is LIVE
+    let late = funded(&mut r.svm, 100 * BUY_IN);
+    send(&mut r.svm, &[join_ix(&r.room, &late.pubkey())], &late, &[&late]).expect("live join");
+    let acc = read_room(&r.svm, &r.room);
+    assert_eq!(acc.player_count, 2, "mid-match joiner is in");
+    assert_eq!(acc.pot_lamports, 2 * BUY_IN, "late joiner paid the same buy-in into escrow");
+
+    // The late joiner still cannot touch a pre-match market (locked at kickoff).
+    expect_err(
+        send(&mut r.svm, &[commit_ix(&r.room, &late.pubkey(), 0, 1, [9u8; 32])], &late, &[&late]),
+        "MarketLocked",
+    );
+
+    // At/after the cutoff (= full time here) joining is over.
+    warp(&mut r.svm, T_END);
+    let too_late = funded(&mut r.svm, 100 * BUY_IN);
+    expect_err(
+        send(&mut r.svm, &[join_ix(&r.room, &too_late.pubkey())], &too_late, &[&too_late]),
+        "WrongPhase",
+    );
+}
+
+#[test]
 fn pre_match_market_must_lock_at_kickoff() {
     let mut svm = boot();
     let creator = funded(&mut svm, 100 * BUY_IN);

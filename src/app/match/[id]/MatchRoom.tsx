@@ -53,10 +53,10 @@ function MetaStat({ label, value, accent }: { label: string; value: string; acce
 }
 
 /**
- * The PAID-ONLY entry gate — sportsbook style, dollars only. You cannot enter
- * a room without paying the entry (which, under the hood, is an on-chain
- * transaction moving the buy-in into the room escrow). Sign in → auto $50
- * demo → pay → play. No crypto terms in the UI.
+ * The PAID-ONLY entry gate — sportsbook style, dollars only, no sign-in. A
+ * guest wallet is provisioned silently on landing with $15 demo; entering a
+ * room still requires paying the entry (an on-chain transaction moving the
+ * buy-in into the room escrow, under the hood). No crypto terms in the UI.
  */
 function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) {
   const w = useWallet();
@@ -67,37 +67,12 @@ function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) 
     case "loading":
       body = <p className="text-sm text-muted">Checking the room…</p>;
       break;
-    case "signed-out":
-      body = (
-        <>
-          <p className="text-sm text-muted">
-            Sign in with your email and get <span className="font-semibold text-text">$50.00 demo money</span> to
-            play instantly. Not real funds — ever.
-          </p>
-          <button
-            type="button"
-            onClick={w.signIn}
-            disabled={!w.ready}
-            className="mt-3 w-full rounded-[14px] px-4 py-3 text-[15px] font-bold text-[#0a0d12] transition active:scale-[0.99] disabled:opacity-50"
-            style={{ background: "var(--color-lime)" }}
-          >
-            Sign in · get $50 demo
-          </button>
-          {!w.configured && (
-            <p className="mt-2 text-xs text-red">
-              Sign-in is not configured — set <code>NEXT_PUBLIC_PRIVY_APP_ID</code> in{" "}
-              <code>.env.local</code> (free app at dashboard.privy.io) and restart.
-            </p>
-          )}
-        </>
-      );
-      break;
     case "closed":
       body = (
         <>
-          <p className="text-sm text-muted">Entries close at kickoff and this match is already underway.</p>
+          <p className="text-sm text-muted">Entries closed — this match is past the 80-minute late-join cutoff.</p>
           <Link href="/" className="mt-3 block w-full rounded-[14px] bg-panel2 px-4 py-3 text-center text-sm font-bold">
-            Pick an upcoming match ›
+            Pick another match ›
           </Link>
         </>
       );
@@ -115,8 +90,9 @@ function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) 
             className="mt-3 w-full rounded-[14px] px-4 py-3 text-[15px] font-bold text-[#0a0d12] transition active:scale-[0.99] disabled:opacity-60"
             style={{ background: "var(--color-lime)" }}
           >
-            {w.funding ? "Topping up…" : "Top up to $50"}
+            {w.funding ? "Topping up…" : "Top up to $15"}
           </button>
+          {w.fundingNote && <p className="mt-2 text-xs text-red">{w.fundingNote}</p>}
         </>
       );
       break;
@@ -128,7 +104,7 @@ function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) 
           disabled
           className="w-full rounded-[14px] bg-panel2 px-4 py-3 text-[15px] font-bold text-muted"
         >
-          {chain.status === "approving" ? "Confirm to place your entry…" : "Placing your entry…"}
+          Placing your entry…
         </button>
       );
       break;
