@@ -162,7 +162,18 @@ function JoinGate({ chain, buyIn }: { chain: OnchainRoomState; buyIn: number }) 
 export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string }) {
   const buyIn = (TIERS.find((t) => t.key === tier) ?? TIERS[0]).buyIn;
   const room = useRoom(fixtureId, `${fixtureId}-${tier}`, buyIn, RAKE_BPS);
-  const chain = useOnchainRoom(fixtureId, buyIn, room.ready ? room.kickoffAt : null);
+  // A replay re-runs a finished fixture from kickoff, so its real kickoff is days
+  // past the 80-minute join cutoff — which would render the room "Entries closed".
+  // Anchor the entry gate + the on-chain join deadline to a stable "now" for
+  // replays, so a finished World Cup match is fully joinable and settleable on
+  // camera (and for judges testing post-deadline). The feed still replays the
+  // real event stream; only the paid-entry window is shifted to the present.
+  const [replayKickoff] = useState(() => Date.now());
+  const chain = useOnchainRoom(
+    fixtureId,
+    buyIn,
+    room.ready ? (room.isReplay ? replayKickoff : room.kickoffAt) : null,
+  );
   const joined = chain.status === "joined";
 
   // Local tick so the per-row lock countdowns update without feed events.
