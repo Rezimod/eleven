@@ -73,19 +73,39 @@ export function roomPda(authority: PublicKey, roomId: BN): PublicKey {
   )[0];
 }
 
-/** Untyped-IDL escape hatch: the generic Program type doesn't know account names. */
-interface RoomNamespace {
-  room: { all(filters: unknown[]): Promise<Array<{ publicKey: PublicKey; account: unknown }>> };
-}
-
-/** Every on-chain room for a fixture (devnet `getProgramAccounts` + memcmp). */
+/**
+ * Every on-chain room for a fixture (devnet `getProgramAccounts` + memcmp).
+ *
+ * Each `Room` account is decoded defensively: legacy or incompatible accounts
+ * left on devnet by earlier program versions are skipped rather than aborting
+ * the whole fetch. Anchor's `.room.all()` decodes the batch in one pass, so a
+ * single undecodable account there threw `Invalid bool: N` and blanked the room
+ * (the pre-match/entry card would surface the raw error). Per-account try/catch
+ * keeps room discovery working against a devnet littered with old test rooms.
+ */
 export async function fetchRoomsForFixture(fixtureId: number): Promise<OpenRoom[]> {
   const fixtureBytes = Buffer.alloc(4);
   fixtureBytes.writeUInt32LE(fixtureId);
-  const rooms = await (program().account as unknown as RoomNamespace).room.all([
+  const prog = program();
+  const roomDisc = (idl as Idl).accounts?.find((a) => a.name === "Room")?.discriminator;
+  const filters: Array<{ memcmp: { offset: number; bytes: string } }> = [
     { memcmp: { offset: FIXTURE_ID_OFFSET, bytes: utils.bytes.bs58.encode(fixtureBytes) } },
-  ]);
-  return rooms.map((r) => ({ pubkey: r.publicKey, account: r.account as RoomAccount }));
+  ];
+  if (roomDisc) {
+    filters.unshift({
+      memcmp: { offset: 0, bytes: utils.bytes.bs58.encode(Buffer.from(roomDisc as number[])) },
+    });
+  }
+  const raw = await getConnection().getProgramAccounts(prog.programId, { filters });
+  const out: OpenRoom[] = [];
+  for (const { pubkey, account } of raw) {
+    try {
+      out.push({ pubkey, account: prog.coder.accounts.decode<RoomAccount>("Room", account.data) });
+    } catch {
+      // legacy/incompatible layout left on devnet — skip, don't blank the room
+    }
+  }
+  return out;
 }
 
 export function isJoinable(r: RoomAccount, buyInLamports: number, nowSec: number): boolean {
