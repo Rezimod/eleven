@@ -175,6 +175,12 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
     room.ready ? (room.isReplay ? replayKickoff : room.kickoffAt) : null,
   );
   const joined = chain.status === "joined";
+  // Free play (no wallet, demo money): the prediction + scoring + verifiable
+  // settlement all run in the client engine (room.*); the chain is only the paid
+  // escrow. Free play lets anyone play the full predict → settle → receipt loop
+  // instantly — the hero path from docs/DEMO.md — without an on-chain entry.
+  const [freePlay, setFreePlay] = useState(false);
+  const inRoom = joined || freePlay;
 
   // Local tick so the per-row lock countdowns update without feed events.
   const [, setTick] = useState(0);
@@ -188,7 +194,7 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
   // Room state machine: Lobby (pre-match) → Live → FullTime.
   const gamePhase = room.phase === "ended" ? "fulltime" : room.phase === "commit" ? "lobby" : "live";
   // On-chain truth once a room exists; the local engine only mirrors YOUR scoring.
-  const players = Math.max(chain.players, joined ? 1 : 0);
+  const players = Math.max(chain.players, inRoom ? 1 : 0);
   const pot = chain.potLamports;
   const secsToKickoff = Math.max(0, Math.ceil((room.kickoffAt - Date.now()) / 1000));
 
@@ -239,10 +245,17 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
         </div>
       </div>
 
-      {!joined ? (
-        /* ── NOT PAID IN: the only way through is the entry payment ────────── */
+      {!inRoom ? (
+        /* ── NOT IN: pay to enter the prize pool, or play free (demo) ───────── */
         <div className="flex flex-col gap-3">
           <JoinGate chain={chain} buyIn={buyIn} />
+          <button
+            type="button"
+            onClick={() => setFreePlay(true)}
+            className="w-full rounded-[14px] border border-line bg-panel2 px-4 py-3 text-center text-sm font-bold text-text transition active:scale-[0.99]"
+          >
+            Play free — no wallet, no entry ▸
+          </button>
           {room.phase !== "ended" && <StatsBar home={homeShort || home} away={awayShort || away} stats={room.stats} />}
           <EventTicker events={room.events} />
         </div>
