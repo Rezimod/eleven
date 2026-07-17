@@ -5,6 +5,7 @@ import { useEffect, useMemo, useReducer } from "react";
 import {
   addMarket,
   createRoom,
+  joinRoom,
   predict as corePredict,
   resolveMarket,
   settle,
@@ -30,6 +31,52 @@ import { feedMode, getFeed, type MatchClock, type MatchEvent, type Score } from 
 import { mockSettleArgs, settleArgsToReceiptProof, type ReceiptProof } from "@/lib/txline";
 
 const YOU = "You";
+
+// ── Sim-only exhibition opponents ────────────────────────────────────────────
+// So a demo room settles as a real 3-player pot (You + 2), the sim seeds two
+// scripted opponents that also predict. NEVER seeded off the sim feed — a real
+// on-chain room's opponents pay their buy-in + commit their picks on-chain, and
+// never appear here. Their scoring runs through the exact same pure engine.
+const BOTS = ["Nino", "Luka"] as const;
+
+function botSide(marketId: string, bot: string): Side {
+  let h = 0;
+  const s = bot + "|" + marketId;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0;
+  // One aggressive opponent (leans YES — events happen in an open match), one mixed.
+  const yesBias = bot === "Nino" ? 7 : 4;
+  return h % 10 < yesBias ? "yes" : "no";
+}
+
+/** Add the exhibition opponents to the pot (sim only). No-op otherwise. */
+function seedBots(room: Room, now: number): Room {
+  if (feedMode() !== "sim") return room;
+  let r = room;
+  for (const bot of BOTS) {
+    try {
+      r = joinRoom(r, bot, Math.min(now, r.joinDeadline - 1));
+    } catch {
+      /* full / closed — leave the pot as-is */
+    }
+  }
+  return r;
+}
+
+/** Give the exhibition opponents picks on these markets (sim only). */
+function botsPredict(room: Room, specs: MarketSpec[], nowSec: number): Room {
+  if (feedMode() !== "sim") return room;
+  let r = room;
+  for (const spec of specs) {
+    for (const bot of BOTS) {
+      try {
+        r = corePredict(r, bot, spec.id, botSide(spec.id, bot), nowSec);
+      } catch {
+        /* locked / already picked — skip */
+      }
+    }
+  }
+  return r;
+}
 // Pre-match markets lock this many seconds BEFORE the real kickoff — never a fixed
 // countdown from when the user entered the room. Sitting in the lobby never locks them.
 const PRE_MATCH_LOCK_LEAD_SEC = 60;
@@ -263,7 +310,7 @@ function reducer(state: State, a: Action): State {
       // The local room mirrors YOUR scoring only — real opponents pay their
       // buy-in on-chain (join_room) and their sealed picks live in their own
       // commit-reveal PDAs, invisible here until reveal. No free/bot entries.
-      const room = createRoom({
+      let room = createRoom({
         id: state.roomId,
         fixtureId: state.fixtureId,
         creator: YOU,
@@ -275,6 +322,9 @@ function reducer(state: State, a: Action): State {
         refundDeadline: endTs + 3600,
         markets: defs.map((d) => d.spec),
       });
+      // Sim demo: fill the pot with two exhibition opponents + their pre-match picks.
+      room = seedBots(room, lockTs - 1);
+      room = botsPredict(room, defs.map((d) => d.spec), lockTs - PRE_MATCH_LOCK_LEAD_SEC - 1);
       return { ...state, home: a.home, away: a.away, homeShort: a.homeShort, awayShort: a.awayShort, competition: a.competition, status: a.status, lockTs, kickoffTs: kickoffSec, defs, room, ready: true };
     }
     case "PREDICT": {
@@ -314,6 +364,8 @@ function reducer(state: State, a: Action): State {
           room = addMarket(room, gm.spec);
           liveDefs.push(gm);
         }
+        // Sim demo: the exhibition opponents also bet the fresh live markets.
+        room = botsPredict(room, a.opened.map((g) => g.spec), a.nowSec);
       }
 
       // 2) Resolve pre-match markets the moment the feed decides them: monotone
@@ -495,7 +547,7 @@ export function useRoom(fixtureId: number, roomId: string, buyIn: number, rakeBp
     });
 
     const standings: StandingView[] = room
-      ? coreStandings(room).map((s) => ({ ...s, isYou: s.player === YOU, isBot: false }))
+      ? coreStandings(room).map((s) => ({ ...s, isYou: s.player === YOU, isBot: s.player !== YOU }))
       : [];
     const result = room && state.ended ? settle(room) : null;
 
