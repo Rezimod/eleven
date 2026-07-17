@@ -17,14 +17,21 @@ function initials(name: string): string {
  * Slim running-standings strip — initials avatars + points in a single
  * horizontally-scrollable line, sorted by the hook. "You" is pinned lime.
  */
-export function Standings({ standings, pot }: { standings: StandingRow[]; pot: number }) {
+export function Standings({ standings, pot, rakeBps = 0 }: { standings: StandingRow[]; pot: number; rakeBps?: number }) {
   const top = standings.slice(0, 8);
+  const winnerTakes = Math.round(pot * (1 - rakeBps / 10_000));
   return (
     <div className="card flex items-center gap-3 px-3 py-2">
       <div className="shrink-0">
         <div className="eyebrow text-[9px] text-lime">Pot</div>
         <div className="num text-lg font-bold leading-none text-lime">{fmtUsd(pot)}</div>
       </div>
+      {pot > 0 && (
+        <div className="shrink-0">
+          <div className="eyebrow text-[9px] text-faint">Winner takes</div>
+          <div className="num text-sm font-bold leading-none text-text">{fmtUsd(winnerTakes)}</div>
+        </div>
+      )}
       <div className="h-7 w-px shrink-0 bg-line" />
       {top.length === 0 ? (
         <span className="text-xs text-faint">No players yet.</span>

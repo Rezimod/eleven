@@ -193,9 +193,10 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
   const { home, away, homeShort, awayShort, competition } = room.match;
   // Room state machine: Lobby (pre-match) → Live → FullTime.
   const gamePhase = room.phase === "ended" ? "fulltime" : room.phase === "commit" ? "lobby" : "live";
-  // On-chain truth once a room exists; the local engine only mirrors YOUR scoring.
-  const players = Math.max(chain.players, inRoom ? 1 : 0);
-  const pot = chain.potLamports;
+  // On-chain truth once a real room exists; otherwise (free-play / sim demo) the
+  // local engine is the source of the pot + player count (incl. exhibition bots).
+  const players = Math.max(chain.players, room.players, inRoom ? 1 : 0);
+  const pot = chain.potLamports || room.pot;
   const secsToKickoff = Math.max(0, Math.ceil((room.kickoffAt - Date.now()) / 1000));
 
   return (
@@ -262,7 +263,7 @@ export function MatchRoom({ fixtureId, tier }: { fixtureId: number; tier: string
       ) : (
         <div className="flex flex-col gap-3">
           {/* leaderboard strip (pot lives here) */}
-          <Standings standings={room.standings} pot={pot} />
+          <Standings standings={room.standings} pot={pot} rakeBps={room.rakeBps} />
 
           {/* slim meta line */}
           <div className="card flex items-center justify-between gap-2 px-3 py-2">
