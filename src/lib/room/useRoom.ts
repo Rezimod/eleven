@@ -62,12 +62,25 @@ function seedBots(room: Room, now: number): Room {
   return r;
 }
 
+function hash32(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+/** Each opponent only bets a subset of markets, so the pot is a real race the
+ *  player can win — not a bot runaway. */
+function botBets(marketId: string, bot: string): boolean {
+  return hash32("bet|" + bot + "|" + marketId) % 5 < 2; // ~40% of markets
+}
+
 /** Give the exhibition opponents picks on these markets (sim only). */
 function botsPredict(room: Room, specs: MarketSpec[], nowSec: number): Room {
   if (feedMode() !== "sim") return room;
   let r = room;
   for (const spec of specs) {
     for (const bot of BOTS) {
+      if (!botBets(spec.id, bot)) continue;
       try {
         r = corePredict(r, bot, spec.id, botSide(spec.id, bot), nowSec);
       } catch {

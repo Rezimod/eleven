@@ -86,8 +86,10 @@ const MATCHES: SimMatch[] = [
 ];
 
 function speed(): number {
-  const s = Number(process.env.NEXT_PUBLIC_SIM_SPEED ?? "1");
-  return Number.isFinite(s) && s > 0 ? s : 1;
+  // Demo default 6× (a full match settles in ~50s so the leaderboard/payout land
+  // on camera). NEXT_PUBLIC_SIM_SPEED overrides when set to a valid number.
+  const s = Number(process.env.NEXT_PUBLIC_SIM_SPEED);
+  return Number.isFinite(s) && s > 0 ? s : 6;
 }
 
 /** The one fixture that is already LIVE; the rest are upcoming. */
