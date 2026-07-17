@@ -23,23 +23,19 @@ interface ScriptStep {
   goalType?: string;
 }
 
-// One canonical, well-paced timeline. Goals ~every 45s so "next goal" rounds
-// resolve live on camera. Final score 3–3.
+// Real timeline — FIFA World Cup 2026 semi-final, Spain 2–0 France (Dallas).
+// Oyarzabal penalty 22' (won by Yamal), Pedro Porro 58'; Rabiot booked early.
+// `t` is playback seconds; displayed minute = t/300*90, so t≈74→22', t≈194→58'.
 const SCRIPT: ScriptStep[] = [
-  { t: 8, kind: "corner", team: "home" },
-  { t: 22, kind: "goal", team: "home", goalType: "Shot" },
-  { t: 40, kind: "card", team: "away", card: "yellow" },
-  { t: 58, kind: "corner", team: "away" },
-  { t: 74, kind: "goal", team: "away", goalType: "Header" },
-  { t: 96, kind: "corner", team: "home" },
-  { t: 118, kind: "goal", team: "home", goalType: "Shot" },
-  { t: 140, kind: "card", team: "away", card: "red" },
-  { t: 166, kind: "corner", team: "home" },
-  { t: 188, kind: "goal", team: "away", goalType: "Penalty" },
-  { t: 212, kind: "corner", team: "away" },
-  { t: 236, kind: "goal", team: "home", goalType: "Header" },
-  { t: 262, kind: "corner", team: "home" },
-  { t: 286, kind: "goal", team: "away", goalType: "Shot" },
+  { t: 30, kind: "corner", team: "home" }, // ~9'
+  { t: 54, kind: "card", team: "away", card: "yellow" }, // Rabiot ~16'
+  { t: 74, kind: "goal", team: "home", goalType: "Penalty" }, // Oyarzabal 22'
+  { t: 110, kind: "corner", team: "away" }, // ~33'
+  { t: 127, kind: "corner", team: "home" }, // ~38' (off Upamecano)
+  { t: 160, kind: "corner", team: "home" }, // ~48'
+  { t: 194, kind: "goal", team: "home", goalType: "Shot" }, // Porro 58'
+  { t: 230, kind: "corner", team: "away" }, // ~69'
+  { t: 265, kind: "card", team: "home", card: "yellow" }, // ~80'
   { t: 300, kind: "fulltime" },
 ];
 
@@ -59,13 +55,13 @@ interface SimMatch {
 const MATCHES: SimMatch[] = [
   {
     fixtureId: 900101,
-    competition: "World Cup · Round of 16",
-    home: "Brazil",
-    away: "Argentina",
-    homeShort: "BRA",
-    awayShort: "ARG",
-    homeScorers: ["Rodrygo", "Vinícius Jr", "Endrick"],
-    awayScorers: ["J. Álvarez", "L. Martínez", "Messi"],
+    competition: "World Cup · Semi-final",
+    home: "Spain",
+    away: "France",
+    homeShort: "ESP",
+    awayShort: "FRA",
+    homeScorers: ["Oyarzabal", "Porro"],
+    awayScorers: ["Mbappé"],
   },
   {
     fixtureId: 900102,
