@@ -27,19 +27,19 @@ interface ScriptStep {
 // Oyarzabal penalty 22' (won by Yamal), Pedro Porro 58'; Rabiot booked early.
 // `t` is playback seconds; displayed minute = t/300*90, so t≈74→22', t≈194→58'.
 const SCRIPT: ScriptStep[] = [
-  { t: 30, kind: "corner", team: "home" }, // ~9'
-  { t: 54, kind: "card", team: "away", card: "yellow" }, // Rabiot ~16'
-  { t: 74, kind: "goal", team: "home", goalType: "Penalty" }, // Oyarzabal 22'
-  { t: 110, kind: "corner", team: "away" }, // ~33'
-  { t: 127, kind: "corner", team: "home" }, // ~38' (off Upamecano)
-  { t: 160, kind: "corner", team: "home" }, // ~48'
-  { t: 194, kind: "goal", team: "home", goalType: "Shot" }, // Porro 58'
-  { t: 230, kind: "corner", team: "away" }, // ~69'
-  { t: 265, kind: "card", team: "home", card: "yellow" }, // ~80'
-  { t: 300, kind: "fulltime" },
+  { t: 10, kind: "corner", team: "home" }, // ~9'
+  { t: 18, kind: "card", team: "away", card: "yellow" }, // Rabiot ~16'
+  { t: 24, kind: "goal", team: "home", goalType: "Penalty" }, // Oyarzabal 22'
+  { t: 37, kind: "corner", team: "away" }, // ~33'
+  { t: 42, kind: "corner", team: "home" }, // ~38' (off Upamecano)
+  { t: 53, kind: "corner", team: "home" }, // ~48'
+  { t: 64, kind: "goal", team: "home", goalType: "Shot" }, // Porro 58'
+  { t: 77, kind: "corner", team: "away" }, // ~69'
+  { t: 89, kind: "card", team: "home", card: "yellow" }, // ~80'
+  { t: 100, kind: "fulltime" },
 ];
 
-const MATCH_SECONDS = 300;
+const MATCH_SECONDS = 100;
 
 interface SimMatch {
   fixtureId: number;
@@ -89,7 +89,7 @@ function speed(): number {
   // Demo default 6× (a full match settles in ~50s so the leaderboard/payout land
   // on camera). NEXT_PUBLIC_SIM_SPEED overrides when set to a valid number.
   const s = Number(process.env.NEXT_PUBLIC_SIM_SPEED);
-  return Number.isFinite(s) && s > 0 ? s : 6;
+  return Number.isFinite(s) && s > 0 ? s : 3;
 }
 
 /** The one fixture that is already LIVE; the rest are upcoming. */
